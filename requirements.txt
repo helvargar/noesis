@@ -1,0 +1,31 @@
+# Core
+fastapi>=0.110.0
+uvicorn>=0.27.0
+pydantic>=2.8.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+python-multipart>=0.0.6
+sqlalchemy>=2.0.25
+# Database Drivers
+psycopg2-binary
+pymysql
+
+# LlamaIndex
+llama-index>=0.12.0
+llama-index-llms-openai
+llama-index-llms-anthropic
+llama-index-llms-groq
+llama-index-llms-google-genai
+llama-index-embeddings-google-genai
+llama-index-llms-ollama
+llama-index-embeddings-openai
+llama-index-embeddings-huggingface
+
+# Security
+cryptography>=42.0.0
+PyJWT>=2.8.0
+passlib[bcrypt]>=1.7.4
+
+# Utils
+sqlparse>=0.5.0
+pandas

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="it">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noesis AI - Admin Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen active">
+        <div class="login-container">
+            <div class="login-card glass">
+                <div class="logo">
+                    <div class="logo-icon">🧠</div>
+                    <h1>Noesis<span>AI</span></h1>
+                </div>
+                <p class="subtitle">Admin Dashboard</p>
+
+                <form id="login-form">
+                    <div class="input-group">
+                        <label for="email">Email</label>
+                        <input type="email" id="email" placeholder="admin@noesis.ai" required>
+                    </div>
+                    <div class="input-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" placeholder="••••••••" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-full">
+                        <span>Accedi</span>
+                        <span class="btn-loader hidden"></span>
+                    </button>
+                </form>
+                <p id="login-error" class="error-message hidden"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard Screen -->
+    <div id="dashboard-screen" class="screen">
+        <!-- Sidebar -->
+        <aside class="sidebar glass">
+            <div class="sidebar-header">
+                <div class="logo-small">🧠</div>
+                <span>Noesis<strong>AI</strong></span>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" data-section="tenants">
+                    <span class="nav-icon">🏢</span>
+                    <span>Tenants</span>
+                </a>
+                <a href="#" class="nav-item" data-section="users">
+                    <span class="nav-icon">👥</span>
+                    <span>Utenti</span>
+                </a>
+                <a href="#" class="nav-item" data-section="metrics">
+                    <span class="nav-icon">📊</span>
+                    <span>Metriche</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="user-info">
+                    <span class="user-avatar">👤</span>
+                    <span id="user-email">admin</span>
+                </div>
+                <button id="logout-btn" class="btn btn-ghost btn-small">Logout</button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Tenants Section -->
+            <section id="tenants-section" class="section active">
+                <div class="section-header">
+                    <div>
+                        <h2>Gestione Tenants</h2>
+                        <p>Configura i tuoi clienti e le loro integrazioni</p>
+                    </div>
+                    <button id="new-tenant-btn" class="btn btn-primary">
+                        <span>+ Nuovo Tenant</span>
+                    </button>
+                </div>
+
+                <div id="tenants-grid" class="cards-grid">
+                    <!-- Tenant cards will be inserted here -->
+                </div>
+            </section>
+
+            <!-- Users Section -->
+            <section id="users-section" class="section">
+                <div class="section-header">
+                    <div>
+                        <h2>Gestione Utenti</h2>
+                        <p>Crea e gestisci gli utenti per ogni tenant</p>
+                    </div>
+                </div>
+                <div class="coming-soon">
+                    <span class="emoji">🚧</span>
+                    <p>Sezione in arrivo</p>
+                </div>
+            </section>
+
+            <!-- Metrics Section -->
+            <section id="metrics-section" class="section">
+                <div class="section-header">
+                    <div>
+                        <h2>Metriche & Usage</h2>
+                        <p>Monitora l'utilizzo della piattaforma</p>
+                    </div>
+                </div>
+                <div class="coming-soon">
+                    <span class="emoji">📈</span>
+                    <p>Sezione in arrivo</p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- New Tenant Modal -->
+    <div id="tenant-modal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content glass">
+            <div class="modal-header">
+                <h3 id="modal-title">Nuovo Tenant</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="tabs">
+                    <button class="tab active" data-tab="basic">Generale</button>
+                    <button class="tab" data-tab="llm">LLM</button>
+                    <button class="tab" data-tab="database">Database</button>
+                    <button class="tab" data-tab="documents">Documenti</button>
+                </div>
+
+                <!-- Basic Tab -->
+                <div id="tab-basic" class="tab-content active">
+                    <div class="input-group">
+                        <label>Nome Azienda *</label>
+                        <input type="text" id="tenant-name" placeholder="Acme Corporation" required>
+                    </div>
+                </div>
+
+                <!-- LLM Tab -->
+                <div id="tab-llm" class="tab-content">
+                    <div class="input-group">
+                        <label>Provider LLM *</label>
+                        <select id="llm-provider">
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic</option>
+                            <option value="groq">Groq (Free API)</option>
+                            <option value="gemini">Google Gemini (Free API)</option>
+                            <option value="ollama">Ollama (Local/Free)</option>
+                            <option value="azure_openai">Azure OpenAI</option>
+                        </select>
+                    </div>
+                    <div class="input-group">
+                        <label>API Key *</label>
+                        <input type="password" id="llm-api-key" placeholder="sk-...">
+                    </div>
+                    <div class="input-group">
+                        <label>Modello</label>
+                        <select id="llm-model-select">
+                            <optgroup label="OpenAI">
+                                <option value="gpt-4o">gpt-4o (Consigliato)</option>
+                                <option value="gpt-4o-mini">gpt-4o-mini (Veloce/Economico)</option>
+                                <option value="gpt-4.1">gpt-4.1</option>
+                                <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+                                <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+                            </optgroup>
+                            <optgroup label="Anthropic">
+                                <option value="claude-3-5-sonnet-20240620">Claude 3.5 Sonnet</option>
+                                <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                                <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+                            </optgroup>
+                            <optgroup label="Groq (Fast / Free Tier)">
+                                <option value="llama-3.1-8b-instant">Llama 3.1 8B (Limitato ma Veloce - CONSIGLIATO
+                                    FREE)</option>
+                                <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Potente - Spesso in Rate Limit su
+                                    Free)</option>
+                                <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                            </optgroup>
+                            <optgroup label="Google Gemini (Free Tier - 2026)">
+                                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Consigliato - Più Stabile)</option>
+                                <option value="gemini-2.0-flash">Gemini 2.0 Flash (Alta Quota)</option>
+                                <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash-Lite (Velocissimo)</option>
+                                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (Nuovo - Veloce)</option>
+                            </optgroup>
+                            <optgroup label="Ollama (Local)">
+                                <option value="llama3">Llama 3</option>
+                                <option value="mistral">Mistral</option>
+                                <option value="phi3">Phi-3</option>
+                            </optgroup>
+                            <option value="custom">-- Specifica modello personalizzato --</option>
+                        </select>
+                    </div>
+                    <div id="custom-model-group" class="input-group hidden">
+                        <label>ID Modello Personalizzato</label>
+                        <input type="text" id="llm-model-custom" placeholder="es. gpt-4-32k">
+                    </div>
+                </div>
+
+                <!-- Database Tab -->
+                <div id="tab-database" class="tab-content">
+                    <div class="toggle-group">
+                        <label class="toggle">
+                            <input type="checkbox" id="db-enabled">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span>Abilita connessione database</span>
+                    </div>
+
+                    <div id="db-fields" class="hidden">
+                        <div class="input-row">
+                            <div class="input-group">
+                                <label>Tipo</label>
+                                <select id="db-type">
+                                    <option value="postgres">PostgreSQL</option>
+                                    <option value="mysql">MySQL</option>
+                                    <option value="sqlite">SQLite</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label>Host</label>
+                                <input type="text" id="db-host" placeholder="localhost">
+                            </div>
+                            <div class="input-group" style="max-width: 100px;">
+                                <label>Porta</label>
+                                <input type="number" id="db-port" value="5432">
+                            </div>
+                        </div>
+                        <div class="input-row">
+                            <div class="input-group">
+                                <label>Nome Database</label>
+                                <input type="text" id="db-name" placeholder="mydb">
+                            </div>
+                            <div class="input-group">
+                                <label>Username</label>
+                                <input type="text" id="db-user" placeholder="postgres">
+                            </div>
+                            <div class="input-group">
+                                <label>Password</label>
+                                <input type="password" id="db-password" placeholder="••••••••">
+                            </div>
+                        </div>
+
+                        <div class="input-row">
+                            <div class="input-group">
+                                <label>Schema (PostgreSQL)</label>
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <select id="db-schema" style="flex: 1;">
+                                        <option value="public">public</option>
+                                    </select>
+                                    <button type="button" id="fetch-schemas-btn" class="btn btn-ghost btn-small"
+                                        style="white-space: nowrap;">
+                                        🔄 Aggiorna Lista
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="input-group" style="flex: 2;">
+                                <label>Tabelle consentite (opzionale, separate da virgola)</label>
+                                <input type="text" id="db-tables" placeholder="tabelle1, tabella2">
+                            </div>
+                        </div>
+                        <div class="modal-tab-actions">
+                            <button id="test-db-btn" class="btn btn-ghost btn-small">
+                                🔌 Test Connessione
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Documents Tab -->
+                <div id="tab-documents" class="tab-content">
+                    <div class="upload-area" id="upload-area">
+                        <span class="upload-icon">📄</span>
+                        <p>Trascina i file qui o <strong>clicca per selezionare</strong></p>
+                        <p class="upload-hint">PDF, TXT, MD, DOCX (max 50MB)</p>
+                        <input type="file" id="file-input" multiple accept=".pdf,.txt,.md,.docx" hidden>
+                    </div>
+                    <div id="file-list" class="file-list"></div>
+                </div>
+            </div>
+
+            <div class="modal-footer">
+                <button class="btn btn-ghost modal-cancel">Annulla</button>
+                <button id="save-tenant-btn" class="btn btn-primary">Salva Tenant</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Modal -->
+    <div id="chat-modal" class="modal hidden">
+        <div class="modal-backdrop"></div>
+        <div class="modal-content glass chat-modal-content">
+            <div class="modal-header">
+                <h3 id="chat-modal-title">Test Chat AI</h3>
+                <button class="modal-close chat-modal-close">&times;</button>
+            </div>
+            <div class="modal-body chat-modal-body">
+                <div id="chat-history" class="chat-history">
+                    <div class="chat-message system">
+                        <p>Benvenuto nel test chat. Fai una domanda al bot per testare le integrazioni SQL e RAG.
+                        </p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer chat-modal-footer">
+                <form id="chat-form" class="chat-form">
+                    <input type="text" id="chat-input" placeholder="Chiedi qualcosa..." required autocomplete="off">
+                    <button type="submit" class="btn btn-primary">
+                        <span>Invia</span>
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container"></div>
+
+    <script src="/static/js/app.js?v=20260206_1600"></script>
+</body>
+
+</html>

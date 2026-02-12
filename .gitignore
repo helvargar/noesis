@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.log
+.env
+.DS_Store
+.idea/
+.vscode/
+node_modules/
+dist/
+build/
+*.pyc
+*.pyo
+*.pyd
+.db
+data/*.json
+!data/semantic_dictionary.json

@@ -1,0 +1,119 @@
+{
+    "tables": {
+        "artistwork": {
+            "description": {
+                "en": "Main register of ARTWORKS. Contains titles, descriptions, and artist links.",
+                "it": "Registro principale delle OPERE d'arte. Contiene titoli, descrizioni e link agli artisti."
+            },
+            "columns": {
+                "artistworktitle": {
+                    "labels": [
+                        "titolo",
+                        "nome opera",
+                        "title",
+                        "name"
+                    ]
+                },
+                "artistname": {
+                    "labels": [
+                        "artista",
+                        "autore",
+                        "artist",
+                        "author"
+                    ]
+                },
+                "artistworkdescription": {
+                    "labels": [
+                        "descrizione",
+                        "info",
+                        "description"
+                    ]
+                },
+                "realizationyear": {
+                    "labels": [
+                        "anno",
+                        "data",
+                        "year",
+                        "date"
+                    ]
+                },
+                "techniquedescription": {
+                    "labels": [
+                        "tecnica",
+                        "materiale",
+                        "technique",
+                        "material"
+                    ]
+                }
+            }
+        },
+        "artist": {
+            "description": {
+                "en": "Biographies and details of artists.",
+                "it": "Biografie e dettagli degli artisti."
+            },
+            "columns": {
+                "artistname": {
+                    "labels": [
+                        "nome",
+                        "name"
+                    ]
+                },
+                "biography": {
+                    "labels": [
+                        "biografia",
+                        "vita",
+                        "storia",
+                        "biography",
+                        "life"
+                    ]
+                }
+            }
+        },
+        "room": {
+            "description": {
+                "en": "Museum rooms and galleries where artworks are located.",
+                "it": "Sale e gallerie del museo dove si trovano le opere."
+            },
+            "columns": {
+                "roomname": {
+                    "labels": [
+                        "sala",
+                        "stanza",
+                        "galleria",
+                        "dove si trova",
+                        "room",
+                        "gallery",
+                        "location"
+                    ]
+                }
+            }
+        },
+        "site": {
+            "description": {
+                "en": "Registry of MUSEUMS (e.g. BAILO, SANTA CATERINA).",
+                "it": "Registro dei MUSEI (es. BAILO, SANTA CATERINA)."
+            },
+            "columns": {
+                "sitename": {
+                    "labels": [
+                        "museo",
+                        "sede",
+                        "luogo",
+                        "museum",
+                        "site"
+                    ]
+                },
+                "address": {
+                    "labels": [
+                        "indirizzo",
+                        "via",
+                        "dove",
+                        "address",
+                        "location"
+                    ]
+                }
+            }
+        }
+    }
+}
