@@ -449,12 +449,18 @@ function editTenant(tenantId) {
 
 // ==================== Chat Test Management ====================
 let chatActiveTenantId = null;
+let chatSessionId = null;
 
 function openChatModal(tenantId) {
     const tenant = tenants.find(t => t.id === tenantId);
     if (!tenant) return;
 
     chatActiveTenantId = tenantId;
+    // Generate a fresh session ID for every new chat opening to ensure a clean state
+    chatSessionId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `sess_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
     document.getElementById('chat-modal-title').textContent = `Test Chat: ${tenant.name}`;
     document.getElementById('chat-modal').classList.remove('hidden');
 
@@ -499,7 +505,11 @@ async function sendChatMessage() {
     try {
         const response = await api(`/tenants/${chatActiveTenantId}/chat`, {
             method: 'POST',
-            body: JSON.stringify({ query })
+            body: JSON.stringify({
+                query,
+                session_id: chatSessionId,
+                site_id: "1" // Default site_id for testing (Bailo)
+            })
         });
 
         loadingMsg.innerHTML = `<p>${response.answer}</p>`;

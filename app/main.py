@@ -17,7 +17,7 @@ app = FastAPI(
 async def startup_event():
     """Run startup tasks."""
     # Warmup AI pipelines for active tenants to reduce first-query latency
-    await warmup_pipelines()
+    # await warmup_pipelines()
 
 # Include API routers
 app.include_router(auth_router, prefix="/api/v1")

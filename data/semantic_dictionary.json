@@ -1,116 +1,229 @@
 {
+    "domain": "Museum Knowledge Base & Cultural Heritage",
+    "version": "2.1",
+    "description": "Mappa semantica per l'intelligenza artificiale. Definisce il significato dei termini e le relazioni tra le entità del museo.",
     "tables": {
         "artistwork": {
-            "description": {
-                "en": "Main register of ARTWORKS. Contains titles, descriptions, and artist links.",
-                "it": "Registro principale delle OPERE d'arte. Contiene titoli, descrizioni e link agli artisti."
-            },
+            "description": "Opere d'arte, quadri, sculture, reperti fisici.",
+            "concepts": [
+                "opera",
+                "quadro",
+                "scultura",
+                "dipinto",
+                "manufatto",
+                "oggetto",
+                "artwork",
+                "painting",
+                "sculpture"
+            ],
             "columns": {
                 "artistworktitle": {
                     "labels": [
                         "titolo",
-                        "nome opera",
+                        "nome",
                         "title",
                         "name"
-                    ]
-                },
-                "artistname": {
-                    "labels": [
-                        "artista",
-                        "autore",
-                        "artist",
-                        "author"
                     ]
                 },
                 "artistworkdescription": {
                     "labels": [
                         "descrizione",
                         "info",
-                        "description"
+                        "storia",
+                        "description",
+                        "details"
                     ]
                 },
                 "realizationyear": {
                     "labels": [
                         "anno",
                         "data",
+                        "periodo",
                         "year",
                         "date"
                     ]
-                },
+                }
+            }
+        },
+        "technique": {
+            "description": "Tecniche e materiali di realizzazione (es. Marmo, Olio su tela).",
+            "concepts": [
+                "dipinto",
+                "quadro",
+                "tela",
+                "pittura",
+                "olio",
+                "tecnica",
+                "materiale",
+                "marmo",
+                "gesso",
+                "technique",
+                "material"
+            ],
+            "columns": {
                 "techniquedescription": {
                     "labels": [
-                        "tecnica",
-                        "materiale",
-                        "technique",
-                        "material"
+                        "nome tecnica",
+                        "descrizione materiale"
+                    ]
+                }
+            }
+        },
+        "artistcategory": {
+            "description": "Categorie di artisti (es. Scultori, Pittori).",
+            "concepts": [
+                "scultura",
+                "statua",
+                "busto",
+                "categoria",
+                "tipo artista",
+                "scultore",
+                "pittore",
+                "category",
+                "sculptor",
+                "painter"
+            ],
+            "columns": {
+                "artistcategorydescription": {
+                    "labels": [
+                        "nome categoria",
+                        "tipo"
                     ]
                 }
             }
         },
         "artist": {
-            "description": {
-                "en": "Biographies and details of artists.",
-                "it": "Biografie e dettagli degli artisti."
-            },
+            "description": "Autori, pittori, scultori e biografie.",
+            "concepts": [
+                "artista",
+                "autore",
+                "pittore",
+                "scultore",
+                "biografia",
+                "artist",
+                "author",
+                "painter",
+                "sculptor"
+            ],
             "columns": {
                 "artistname": {
                     "labels": [
                         "nome",
+                        "cognome",
                         "name"
                     ]
                 },
-                "biography": {
+                "artistdescription": {
                     "labels": [
+                        "descrizione",
                         "biografia",
                         "vita",
                         "storia",
+                        "description",
                         "biography",
                         "life"
                     ]
                 }
             }
         },
+        "pathway": {
+            "description": "Collezioni tematiche, percorsi di visita e raccolte del museo.",
+            "concepts": [
+                "collezione",
+                "raccolta",
+                "percorso",
+                "tour",
+                "itinerario",
+                "mostra",
+                "collection",
+                "exhibition",
+                "pathway"
+            ],
+            "columns": {
+                "pathwayname": {
+                    "labels": [
+                        "nome",
+                        "titolo",
+                        "name",
+                        "title"
+                    ]
+                },
+                "pathwaydescription": {
+                    "labels": [
+                        "descrizione",
+                        "info",
+                        "description"
+                    ]
+                }
+            }
+        },
         "room": {
-            "description": {
-                "en": "Museum rooms and galleries where artworks are located.",
-                "it": "Sale e gallerie del museo dove si trovano le opere."
-            },
+            "description": "Sale e spazi fisici dove si trovano le opere.",
+            "concepts": [
+                "sala",
+                "stanza",
+                "galleria",
+                "posizione",
+                "dove",
+                "room",
+                "gallery",
+                "location"
+            ],
             "columns": {
                 "roomname": {
                     "labels": [
-                        "sala",
-                        "stanza",
-                        "galleria",
-                        "dove si trova",
-                        "room",
-                        "gallery",
-                        "location"
+                        "nome",
+                        "numero",
+                        "name",
+                        "number"
+                    ]
+                }
+            }
+        },
+        "pathwayspot": {
+            "description": "Tabella di collegamento (junction) tra percorsi e opere d'arte.",
+            "concepts": [
+                "collegamento percorso",
+                "opere del percorso"
+            ],
+            "columns": {
+                "pathwayid": {
+                    "labels": [
+                        "id percorso"
+                    ]
+                },
+                "artistworkid": {
+                    "labels": [
+                        "id opera"
                     ]
                 }
             }
         },
         "site": {
-            "description": {
-                "en": "Registry of MUSEUMS (e.g. BAILO, SANTA CATERINA).",
-                "it": "Registro dei MUSEI (es. BAILO, SANTA CATERINA)."
-            },
+            "description": "Sedi museali e informazioni sulla struttura.",
+            "concepts": [
+                "museo",
+                "sede",
+                "edificio",
+                "palazzo",
+                "museum",
+                "site",
+                "building"
+            ],
             "columns": {
                 "sitename": {
                     "labels": [
-                        "museo",
+                        "nome",
                         "sede",
-                        "luogo",
-                        "museum",
-                        "site"
+                        "name"
                     ]
                 },
                 "address": {
                     "labels": [
                         "indirizzo",
                         "via",
-                        "dove",
-                        "address",
-                        "location"
+                        "dove si trova",
+                        "address"
                     ]
                 }
             }

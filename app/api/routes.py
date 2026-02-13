@@ -316,6 +316,7 @@ class ChatRequest(BaseModel):
     query: str
     session_id: Optional[str] = None
     site_id: Optional[str] = None
+    target: Optional[str] = None
 
 class ChatResponse(BaseModel):
     answer: str
@@ -416,7 +417,7 @@ async def chat(
         raise HTTPException(status_code=500, detail=f"AI Engine Error: {str(e)}")
 
     try:
-        result = await pipeline.query(request.query, site_id=request.site_id, session_id=request.session_id)
+        result = await pipeline.query(request.query, site_id=request.site_id, session_id=request.session_id, target=request.target)
         answer = result["answer"]
         source_type = result["source_type"]
         

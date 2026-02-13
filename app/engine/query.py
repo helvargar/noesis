@@ -1,7 +1,7 @@
-from llama_index.core import VectorStoreIndex, SQLDatabase, Settings
+from llama_index.core import VectorStoreIndex, SQLDatabase, Settings, PromptTemplate
 from llama_index.core.query_engine import NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine
 from llama_index.core.objects import SQLTableNodeMapping, ObjectIndex, SQLTableSchema
-from llama_index.core.tools import QueryEngineTool, ToolMetadata
+from llama_index.core.tools import QueryEngineTool, ToolMetadata, FunctionTool
 from llama_index.core.agent import ReActAgent
 from app.core.factory import LLMFactory, EmbedModelFactory
 from app.engine.guardrails import SQLGuardrails
@@ -54,9 +54,23 @@ class TenantQueryPipeline:
         # 3. Session memory: storing actual ChatMessage objects
         self.session_memory: Dict[str, List[ChatMessage]] = {}
 
+        # 3. Buffer for large SQL results to prevent summarization
+        self.last_sql_result = None
+        
         # 3. Setup SQL Engine (if db provided)
         if sql_connection_str:
             print(f"--- Init SQL Database (Schema: {self.schema_name or 'public'}) ---")
+            
+            # --- DOMAIN INTELLIGENCE: Load Semantic Paradigm first to optimize reflection ---
+            try:
+                current_dir = os.path.dirname(os.path.abspath(__file__))
+                dict_path = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "data", "semantic_dictionary.json")
+                with open(dict_path, 'r') as f:
+                    sem_paradigm = json.load(f)
+            except Exception as e:
+                print(f"[ERROR] Critical: Failed to load semantic paradigm: {e}")
+                sem_paradigm = {"tables": {}}
+
             from sqlalchemy import create_engine, event
             engine = create_engine(sql_connection_str)
             
@@ -66,350 +80,292 @@ class TenantQueryPipeline:
                 print(f"[SQL] Executing: {statement}")
                 if parameters:
                     print(f"[SQL] Parameters: {parameters}")
-
-            # Optimization: only reflect what's needed
-            tables_to_reflect = None
+            
+            # Optimization: strictly reflect only what's in our semantic dictionary
+            # plus any specifically allowed tables that aren't '*'
+            known_tables = list(sem_paradigm.get("tables", {}).keys())
+            tables_to_reflect = known_tables
+            
             if allowed_tables and "*" not in allowed_tables:
-                tables_to_reflect = allowed_tables
-                print(f"--- Restricting reflection to: {tables_to_reflect} ---")
-
-            self.sql_database = SQLDatabase(engine, schema=self.schema_name, include_tables=tables_to_reflect)
+                # Further restrict if the tenant has a whitelist
+                tables_to_reflect = [t for t in known_tables if t in allowed_tables]
             
+            print(f"--- Restricting reflection to {len(tables_to_reflect)} tables ---")
 
-            # 1. Hygiene: Strict Whitelist of tables to prevent AI confusion
-            # We only allow tables that are part of the core museum guide logic.
-            WHITELIST = [
-                "artistwork", "artistworklang", "artist", "artistcategory",
-                "site", "room", "floor",
-                "location", "locationdescription",
-                "pathway", "pathwaydescription", "pathwayspot",
-                "technique",
-            ]
-            
-            all_tables = self.sql_database.get_usable_table_names()
-            clean_tables = [t for t in all_tables if t.lower() in WHITELIST]
-            
-            print(f"--- Reflecting {len(clean_tables)} whitelist tables (ignored {len(all_tables) - len(clean_tables)} noise tables) ---")
-            
-            # Re-init SQLDatabase with clean list
-            self.sql_database = SQLDatabase(engine, schema=self.schema_name, include_tables=clean_tables)
+            self.sql_database = SQLDatabase(
+                engine, 
+                schema=self.schema_name, 
+                include_tables=tables_to_reflect, 
+                max_string_length=10000
+            )
 
-            # 2. Semantic Mapping: Give AI descriptions for clean tables
-            # This is the single source of truth for table descriptions.
-            table_context_dict = {
-                # --- OPERE ---
-                "artistwork": (
-                    "Tabella principale OPERE (dati in italiano). "
-                    "REGOLE: 1) Usa SEMPRE ILIKE con % per cercare i titoli (es. WHERE artistworktitle ILIKE '%venere%'). MAI usare =. "
-                    "2) NON tradurre i titoli: cerca il testo originale dell'utente. "
-                    "3) Includi sempre: artistworktitle, artistworkdescription, techniqueid, realizationyear e Nome Autore (JOIN con artist su artistid). "
-                    "4) Per la posizione fisica, JOIN con room su roomid. "
-                    "5) Per utenti non italiani, usa artistworklang per titoli e descrizioni nella loro lingua."
-                ),
-                "artistworklang": (
-                    "Traduzioni multilingua delle opere. Contiene artistworktitle e artistworkdescription tradotti per lingua "
-                    "(languageid: it, en, es, de). JOIN con artistwork su artistworkid. "
-                    "Usa questa tabella per cercare opere quando l'utente parla in lingua straniera o per restituire info tradotte."
-                ),
-                "technique": (
-                    "Decodifica delle tecniche artistiche (es. techniqueid=1 -> 'OLIO SU TELA', techniqueid=10 -> 'BRONZO'). "
-                    "Multilingua: la colonna languageid indica la lingua della descrizione. "
-                    "JOIN con artistwork.techniqueid per mostrare il nome della tecnica invece del solo ID."
-                ),
-                # --- ARTISTI ---
-                "artist": (
-                    "Anagrafica ARTISTI. Contiene: artistname, biography, birthplace, birthdate, deathplace, deathdate. "
-                    "REGOLE: Usa SEMPRE ILIKE con % (es. WHERE artistname ILIKE '%martini%'). MAI usare =. "
-                    "La colonna artistcategoryid si collega ad artistcategory per la categoria (scultore, pittore, ecc.)."
-                ),
-                "artistcategory": (
-                    "Categorie degli artisti (es. SCULTORI, PITTORI, DIRETTORI). Multilingua tramite campo languageid. "
-                    "JOIN con artist.artistcategoryid."
-                ),
-                # --- SPAZI FISICI ---
-                "site": "Anagrafica dei musei (es. BAILO). Contiene indirizzo, storia, architettura, contatti.",
-                "room": "Sale e gallerie del museo. La colonna 'roomname' contiene il nome (es. 'SALA 9'). JOIN con floor tramite floorid per sapere il piano.",
-                "floor": "Piani dell'edificio (es. PIANO TERRA, PRIMO PIANO). JOIN con room.floorid.",
-                "location": (
-                    "Location fisiche del museo (es. SALA 6 PIANO TERRA, INGRESSO MUSEO). "
-                    "Contiene locationname e si collega a room tramite roomid e a site tramite siteid. "
-                    "Usata anche nei percorsi (pathwayspot.locationid)."
-                ),
-                "locationdescription": (
-                    "Descrizioni multilingua delle location. Contiene locationname e locationdescription tradotti per lingua "
-                    "(languageid: it, en, es, de). JOIN con location su locationid."
-                ),
-                # --- PERCORSI ---
-                "pathway": "Percorsi tematici del museo (es. PERCORSO SCULTURA, PERCORSO ANIMALI). Contiene pathwayname e pathwaydescription.",
-                "pathwaydescription": (
-                    "Descrizioni multilingua dei percorsi. Contiene pathwayname e pathwaydescription tradotti "
-                    "(languageid: it, en, es, de). JOIN con pathway su pathwayid."
-                ),
-                "pathwayspot": (
-                    "TAPPE dei percorsi. Collega un percorso (pathwayid) alle sue tappe ordinate (sortingsequence). "
-                    "Ogni tappa può essere un'opera (artistworkid) oppure una location (locationid). "
-                    "Per ottenere le opere di un percorso: JOIN pathway -> pathwayspot -> artistwork. "
-                    "Per ottenere le location di un percorso: JOIN pathway -> pathwayspot -> location."
-                ),
-            }
-
+            # 1. Table Context for Indexer (Filtered by strictly needed tables)
+            from llama_index.core.objects import SQLTableNodeMapping, ObjectIndex, SQLTableSchema
             table_node_mapping = SQLTableNodeMapping(self.sql_database)
             table_schema_objs = []
-            for t in clean_tables:
-                desc = table_context_dict.get(t, f"Database table named {t}")
+            
+            # Only index tables that we actually have in our semantic map
+            for t in tables_to_reflect:
+                table_info = sem_paradigm.get("tables", {}).get(t.lower(), {})
+                raw_desc = table_info.get("description", f"Dati relativi a {t}")
+                desc = raw_desc if isinstance(raw_desc, str) else raw_desc.get("it", f"Dati relativi a {t}")
                 table_schema_objs.append(SQLTableSchema(table_name=t, context_str=desc))
             
-            # 3. Build Index
             obj_index = ObjectIndex.from_objects(
                 table_schema_objs,
                 table_node_mapping,
                 VectorStoreIndex,
             )
 
-            # 4. Universal Context Scanner
-            # The system automatically learns the vocabulary of the database at startup.
-            semantic_context = []
-            try:
-                from sqlalchemy import text
-                
-                # Helper to truncate lists for prompt
-                def truncate_list(items, limit=10):
-                    display_items = items[:limit]
-                    result = ", ".join([f"'{item}'" for item in display_items if item])
-                    if len(items) > limit:
-                        result += f" ... (and {len(items)-limit} more)"
-                    return result
-
-                # Use direct SQL execution for context loading - much more reliable
-                with engine.connect() as conn:
-                    # 1. Load Locations from 'room' table
-                    if "room" in clean_tables:
-                        try:
-                            res = conn.execute(text("SELECT DISTINCT roomname FROM room WHERE roomname IS NOT NULL LIMIT 50"))
-                            rows = res.fetchall()
-                            if rows:
-                                room_names = [r[0] for r in rows if r[0]]
-                                semantic_context.append(f"- ROOMS/GALLERIES MAP: {truncate_list(room_names)}")
-                        except Exception as e:
-                            print(f"[WARN] Failed to load rooms: {e}")
-
-                    # 2. Load Techniques from 'artistwork'
-                    if "artistwork" in clean_tables:
-                        try:
-                            # In production artistwork has techniqueid, joined table or view might have description
-                            res = conn.execute(text("SELECT DISTINCT techniqueid FROM artistwork WHERE techniqueid IS NOT NULL LIMIT 20"))
-                            rows = res.fetchall()
-                            if rows:
-                                tech_ids = [r[0] for r in rows if r[0]]
-                                semantic_context.append(f"- TECHNIQUES MAP: {truncate_list(tech_ids)}")
-                        except Exception as e:
-                            print(f"[WARN] Failed to load techniques: {e}")
-
-                    # 3. Load Sample Titles from 'artistwork'
-                    if "artistwork" in clean_tables:
-                        try:
-                            res = conn.execute(text("SELECT artistworktitle FROM artistwork LIMIT 20"))
-                            rows = res.fetchall()
-                            if rows:
-                                titles = [r[0] for r in rows if r[0]]
-                                semantic_context.append(f"- SAMPLE TITLES: {truncate_list(titles)}")
-                        except Exception as e:
-                            print(f"[WARN] Failed to load titles: {e}")
-
-                    # 3. Load Museums/Sites
-                    if "site" in clean_tables:
-                        try:
-                            res = conn.execute(text("SELECT sitename FROM site LIMIT 20"))
-                            rows = res.fetchall()
-                            if rows:
-                                site_names = [r[0] for r in rows if r[0]]
-                                semantic_context.append(f"- MUSEUMS/LOCATIONS MAP: {truncate_list(site_names)}")
-                        except Exception as e:
-                            print(f"[WARN] Failed to load sites: {e}")
-
-            except Exception as e:
-                print(f"[WARN] Failed to load semantic context: {e}")
-
-            # 5. Load Semantic Dictionary
-            dict_context = ""
-            try:
-                # Use absolute path relative to this file
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                dict_path = os.path.join(os.path.dirname(os.path.dirname(current_dir)), "data", "semantic_dictionary.json")
-                if os.path.exists(dict_path):
-                    with open(dict_path, 'r') as f:
-                        sem_dict = json.load(f)
-                        
-                    dict_lines = ["=== SEMANTIC SCHEMA MAPPING ==="]
-                    for table, config in sem_dict.get("tables", {}).items():
-                        if table in clean_tables:
-                            labels = config.get("description", {}).get("it", "")
-                            cols = []
-                            for col, col_config in config.get("columns", {}).items():
-                                col_labels = "|".join(col_config.get("labels", []))
-                                cols.append(f"{col}({col_labels})")
-                            dict_lines.append(f"- {table}: {labels} Cols: {', '.join(cols)}")
-                    
-                    dict_context = "\n".join(dict_lines)
-            except Exception as dict_err:
-                print(f"[WARN] Failed to load semantic dictionary: {dict_err}")
-
-            learned_knowledge = "\n".join(semantic_context)
-            # Use smaller limit for learned mapping in prompt if needed
-            # (already truncated to 10 in logic above, let's keep it 10 for now but watch tokens)
+            # 2. Global Agent System Prompt
+            # Format the dictionary into a readable guide for the LLM
+            semantic_guide = ["MAPPATURA CONCETTI -> TABELLE DB:"]
+            for table, info in sem_paradigm.get("tables", {}).items():
+                concepts = ", ".join(info.get("concepts", []))
+                desc = info.get("description", "")
+                semantic_guide.append(f"  {concepts} -> tabella '{table}' ({desc})")
 
             context_to_inject = (
-                "Sei un 'Assistente AI' museale esperto. REGOLE FONDAMENTALI:\n"
-                "1. LINGUA: Rispondi SEMPRE nella lingua dell'utente (es. Italiano).\n"
-                "2. PERSONALITÀ: Sii amichevole e colto. NON usare mai parole tecniche come 'database', 'strumenti', 'SQL', 'tabelle' o 'query'. Parla come una persona reale.\n"
-                "3. MISSIONE: Sei la guida del museo. Aiuta con opere, artisti e percorsi. Puoi scambiare saluti e presentarti.\n"
-                "4. LIMITI: Per richieste fuori ambito (es. cucina, sport), rispondi gentilmente che la tua passione e competenza sono limitate alla storia dell'arte del museo.\n"
-                "7. COMPLETEZZA: Fornisci elenchi esaustivi se richiesto. Non troncare mai le liste.\n"
-                "8. PULIZIA TESTI: Le descrizioni nel database contengono spesso tag HTML. Devi rimuoverli o convertirli in testo piano.\n"
-                "9. AMBIGUITÀ: Se una ricerca produce più risultati, elencali e chiedi all'utente di specificare.\n"
-                f"9. MAPPATURE:\n{dict_context}\n"
-                f"10. VALORI CONOSCIUTI:\n{learned_knowledge}\n"
+                "Sei Gyp, l'esperto virtuale del Museo Bailo. Parla in modo colto, cordiale e naturale, come se stessi accompagnando un visitatore.\n\n"
+                "CONOSCENZA DEL MUSEO:\n"
+                f"{chr(10).join(semantic_guide)}\n\n"
+                "REGOLA D'ORO (ACCURACY): Per ogni informazione su artisti, opere, sale o collezioni, DEVI usare 'sql_engine'.\n"
+                "1. VERIDICITÀ: Se il database non restituisce nulla per una ricerca specifica (es. un artista non presente), rispondi che non hai informazioni su quel soggetto nel museo.\n"
+                "2. NO ALLUCINAZIONI: MAI inventare attribuzioni o fatti. Non attribuire mai opere esistenti (es. di Martini) a un artista cercato ma non trovato (es. Picasso).\n"
+                "3. SUGGERIMENTI: Solo se l'utente chiede consigli generici (es. 'cosa mi consigli?'), puoi proporre una selezione delle opere che conosci dal database.\n"
+                "4. BYPASS: Per biografie o storie d'opera integrali, includi sempre il token [[DIRECT_DISPLAY]].\n"
+                "5. SEGRETEZZA: Non parlare mai di SQL, database o tool. Parla come un esperto umano.\n"
             )
 
-            from llama_index.core.query_engine import NLSQLTableQueryEngine
+            # 3. Setup SQL Engine with Enhanced Semantic Mapping
             
-            sql_specific_context = (
-                "STRICT RULES FOR SQL GENERATION:\n"
-                "1. FLEXIBLE SEARCH: Use ILIKE with % (e.g., '%fanciulla%amore%') for text matches.\n"
-                "2. SITE RIGOR: Filter by siteid if provided.\n"
-                "3. OUTPUT: Return ONLY the SQL query code.\n"
-                f"DATABASE SCHEMA:\n{dict_context}\n"
-            )
-
-            from llama_index.core.prompts import PromptTemplate
-
+            # Create a more structured prompt for the SQL engine
             TEXT_TO_SQL_PROMPT_STR = (
-                "Sei un esperto PostgreSQL. Traduci la domanda in SQL.\n"
-                "REGOLE:\n"
-                "1. Usa ILIKE con % (es. '%fanciulla%').\n"
-                "2. Usa 'WHERE siteid = X' se specificato.\n"
-                "3. Restituisci SOLO la query SQL.\n"
-                "Schema:\n{schema}\n"
-                "Context: {context_str}\n"
-                "Question: {query_str}\n"
+                "Sei un assistente esperto SQL per il Museo Bailo. Scrivi query PostgreSQL precise.\n"
+                "Usa il dizionario per mappare i concetti utente alle tabelle:\n"
+                "{context_str}\n\n"
+                "REGOLE SQL:\n"
+                "1. DATABASE LINGUA: Usa termini italiani per i filtri (es. 'OLIO', 'MARMO').\n"
+                "2. TIPOLOGIE: Per 'Dipinti' filtra per artistcategorydescription = 'PITTORI' o techniquedescription ILIKE '%%OLIO%%'. Per 'Sculture' filtra per artistcategorydescription = 'SCULTORI' o techniquedescription ILIKE '%%MARMO%%'.\n"
+                "3. PRECISIONE: Se l'utente cerca un artista specifico, filtra per artistname ILIKE '%%nome%%'.\n"
+                "4. SALE: Se l'utente menziona una sala (es. 'sala 9'), DEVI filtrare per roomname ILIKE '%%sala 9%%'. MAI usare il numero come roomid.\n"
+                "5. SCOPE: Includi 'siteid = 1' solo per 'artistwork' e 'pathway'. La tabella 'room' NON ha siteid.\n"
+                "6. BIOGRAFIE: Per domande su un artista ('chi è...', 'parlami di...'), SELEZIONA SEMPRE 'artistdescription'.\n"
+                "7. OUTPUT: Restituisci esclusivamente il codice SQL, senza commenti, senza scuse e senza preamboli. Se non sei sicuro, scrivi una query di base sulla tabella 'artistwork'.\n\n"
+                "Schema DB:\n{schema}\n"
+                "Domanda: {query_str}\n"
                 "SQLQuery: "
             )
             
+            # Formattiamo il dizionario per il SQL Engine
+            sql_context_lines = ["DIZIONARIO TABELLE E COLONNE:"]
+            for table, info in sem_paradigm.get("tables", {}).items():
+                sql_context_lines.append(f"Table '{table}': {info.get('description', '')}")
+                for col, col_info in info.get("columns", {}).items():
+                    labels = ", ".join(col_info.get("labels", []))
+                    sql_context_lines.append(f"  Colonna '{col}': [{labels}]")
+            
+            sql_context_lines.append("\nPRESCRIZIONE: Privilegia sempre le colonne '...description' per fornire risposte esaustive.")
+
+            # Custom response synthesis prompt - forces the LLM to return full text
+            RESPONSE_SYNTHESIS_PROMPT_STR = (
+                "Sei Gyp, l'assistente del museo. Basandoti sui risultati SQL, scrivi una risposta ESAUSTIVA.\n"
+                "REGOLA D'ORO: Riporta INTEGRALMENTE tutto il testo descrittivo ottenuto (biografie, storie, descrizioni).\n"
+                "NON RIASSUMERE mai. Se il testo dal database è lungo, riportalo tutto.\n\n"
+                "Domanda: {query_str}\n"
+                "Query SQL: {sql_query}\n"
+                "Dati dal DB: {context_str}\n"
+                "Risposta: "
+            )
+
+            # Build tool description dynamically
+            concept_map_desc = ". ".join([
+                f"'{t}' per {', '.join(i.get('concepts', [])[:2])}"
+                for t, i in sem_paradigm.get("tables", {}).items()
+            ])
+
             self.sql_engine = NLSQLTableQueryEngine(
                 self.sql_database,
-                tables=clean_tables,
+                tables=tables_to_reflect,
                 llm=self.llm,
                 sql_limit=500,
-                context_str=sql_specific_context,
+                synthesize_response=False,
+                context_str="\n".join(sql_context_lines),
                 text_to_sql_prompt=PromptTemplate(TEXT_TO_SQL_PROMPT_STR)
             )
-            print("--- SQL Engine Ready (Universal Semantic Mode) ---")
             
-            # Wrap with a tool description
-            sql_tool = QueryEngineTool.from_defaults(
-                query_engine=self.sql_engine,
+            # Sophisticated wrapper to handle raw SQL results and prevent summarization
+            _sql_engine = self.sql_engine
+            import html, re, ast
+            def sql_query_tool(query: str) -> str:
+                """Esegue query sul database del museo. Restituisce il testo integrale trovato."""
+                result = _sql_engine.query(query)
+                raw = str(result)
+                
+                # Try to parse the raw string [('text',), ...] to extract pure text
+                max_field_len = 0
+                # Attempt robust parsing of SQL results (tuples/lists)
+                rows = []
+                try:
+                    # Clean up common SQL string artifacts before eval
+                    raw_eval = raw.replace('datetime.date', 'str')
+                    parsed = ast.literal_eval(raw_eval)
+                    if isinstance(parsed, list):
+                        for row in parsed:
+                            if isinstance(row, (list, tuple)):
+                                # Extract long fields for bypass detection
+                                for col in row:
+                                    if isinstance(col, str):
+                                        max_field_len = max(max_field_len, len(col))
+                                row_str = " - ".join([str(c) for c in row if c is not None and str(c).strip() != ""])
+                                if row_str: rows.append(row_str)
+                            else:
+                                rows.append(str(row))
+                        raw = "\n\n".join(rows)
+                except Exception:
+                    # Fallback: manually strip typical SQL artifacts if eval fails
+                    raw = re.sub(r'[\[\]\(\)]', '', raw)
+                    raw = re.sub(r"None", "", raw)
+                    max_field_len = len(raw)
+                
+                # Global HTML/Tag cleaning
+                raw = html.unescape(raw)
+                raw = re.sub(r'<(p|br|div)[^>]*>', '\n', raw, flags=re.IGNORECASE)
+                raw = re.sub(r'<[^>]+>', ' ', raw)
+                raw = re.sub(r' +', ' ', raw)
+                raw = re.sub(r'\n\s*\n', '\n\n', raw)
+                raw = raw.strip()
+                
+                if not raw or raw == "[]":
+                    return "Nessun dato trovato nel database."
+                
+                # AUTHORITATIVE BYPASS: Trigger if ANY field is very long (biography/description)
+                if max_field_len > 350:
+                    self.last_sql_result = raw
+                    return f"Risultato presente nel sistema ([[DIRECT_DISPLAY]])."
+                
+                return f"Risultato:\n{raw}"
+            
+            sql_tool = FunctionTool.from_defaults(
+                fn=sql_query_tool,
                 name="sql_engine",
-                description=(
-                    "DA USARE PER TUTTE LE DOMANDE SU: Opere d'arte, Artisti, Stanze/Location e Percorsi. "
-                    "Traduce in SQL la domanda. Specifica sempre il siteid se noto."
-                ),
+                description=f"Database del museo. Tabelle: {concept_map_desc}. Per testi lunghi restituisce un segnale di bypass."
             )
             self.query_tools.append(sql_tool)
-            print(f"SQL Tool initialized for tables: {tables_to_reflect}")
 
-        # 4. Setup RAG Engine (if docs exist)
+            # 4. General Chat Tool
+            def general_chat(query: str) -> str:
+                """Utile per saluti o chiacchiere che non richiedono dati."""
+                return f"Ciao! Sono Gyp. Come posso aiutarti oggi?"
+            
+            self.query_tools.append(FunctionTool.from_defaults(fn=general_chat, name="greeting_tool"))
+
+        # 5. RAG Engine
         if doc_store_path and os.path.exists(doc_store_path):
-            # For PoC we assume a local persist dir exists for valid tenant
-            # In prod, this connects to Qdrant/Chroma with tenant filters
             from llama_index.core import StorageContext, load_index_from_storage
             try:
                 storage_context = StorageContext.from_defaults(persist_dir=doc_store_path)
-                vector_index = load_index_from_storage(
-                    storage_context, 
-                    embed_model=self.embed_model
-                )
-                
-                rag_engine = vector_index.as_query_engine(
-                    llm=self.llm,
-                    embed_model=self.embed_model
-                )
-                
-                rag_tool = QueryEngineTool.from_defaults(
+                vector_index = load_index_from_storage(storage_context, embed_model=self.embed_model)
+                rag_engine = vector_index.as_query_engine(llm=self.llm, embed_model=self.embed_model)
+                self.query_tools.append(QueryEngineTool.from_defaults(
                     query_engine=rag_engine,
-                    description=(
-                        "Useful for answering qualitative questions, summaries, or finding information "
-                        "within unsupported text documents, PDFs, or knowledge base articles."
-                    ),
-                )
-                self.query_tools.append(rag_tool)
-                print(f"RAG Tool initialized from: {doc_store_path}")
-            except Exception as e:
-                print(f"Failed to load vector store for tenant {tenant_id}: {e}")
+                    name="document_engine",
+                    description="Usa questo strumento per info estratte da documenti PDF o articoli esterni al database."
+                ))
+            except Exception: pass
 
-        # 5. Create Router
-        # Using LLMSingleSelector to pick the BEST single tool, or MultiSelector for both.
-        # Requirement said "or both", so potentially MultiSelector or nested routing.
-        # For simplicity/robustness in PoC, SingleSelector is often safer, but let's try LLMSingleSelector first.
-        # 3. Build the Agent instead of a rigid Router
-        # The Agent can chat AND use tools when needed.
-        self.agent = ReActAgent(
-            tools=self.query_tools,
-            llm=self.llm,
-            system_prompt=context_to_inject,
-            verbose=True
-        )
-        print("--- Agent Pipeline Initialization Complete ---")
-
-
-
-    async def query(self, user_query: str, site_id: str = None, session_id: str = None) -> dict:
-        """
-        Executes the trusted query pipeline using native ChatMessage context.
-        """
-        if not self.query_tools:
-            return {"answer": "No data sources configured.", "source_type": "none"}
+        # 6. Create Agent
+        try:
+            self.agent = ReActAgent(
+                tools=self.query_tools, 
+                llm=self.llm, 
+                system_prompt=context_to_inject,
+                verbose=False
+            )
             
+        except Exception as e:
+            print(f"[ERROR] Pipeline init failed: {e}")
+            traceback.print_exc()
+
+        except Exception as e:
+            traceback.print_exc()
+            return {"answer": f"Si è verificato un errore: {str(e)}", "source_type": "error"}
+
+    @staticmethod
+    def _sanitize_response(answer: str) -> str:
+        """Remove any leaked technical details from the agent's response."""
+        import re
+        # Remove tool call blocks (```tool_name ... ``` and ```tool_args ... ```)
+        answer = re.sub(r'```tool_name\s*.*?```', '', answer, flags=re.DOTALL)
+        answer = re.sub(r'```tool_args\s*.*?```', '', answer, flags=re.DOTALL)
+        # Remove any remaining code fences with SQL
+        answer = re.sub(r'```sql\s*.*?```', '', answer, flags=re.DOTALL)
+        # Remove siteid references
+        answer = re.sub(r'\[siteid=\d+\]', '', answer)
+        answer = re.sub(r'\(FILTRO OBBLIGATORIO[^)]*\)', '', answer)
+        answer = re.sub(r'siteid\s*=\s*\d+', '', answer, flags=re.IGNORECASE)
+        # Hide technical database errors from user
+        if "Error:" in answer or "SQL" in answer or "column" in answer:
+            if "Nessun dato" not in answer:
+                answer = "Mi dispiace, non sono riuscito a trovare le informazioni specifiche nel mio archivio in questo momento. Posso aiutarti con qualcos'altro o vuoi provare a chiedermi di un artista specifico?"
+        # Remove [[DIRECT_DISPLAY]] token if it leaked
+        answer = answer.replace('[[DIRECT_DISPLAY]]', '')
+        # Remove "Thought:", "Action:", "Observation:" lines (ReAct internals)
+        answer = re.sub(r'^(Thought|Action|Observation|Action Input):.*$', '', answer, flags=re.MULTILINE)
+        # Clean up excessive whitespace
+        answer = re.sub(r'\n{3,}', '\n\n', answer)
+        return answer.strip()
+
+    async def query(self, user_query: str, session_id: str, site_id: str = None, target: str = None):
         start_time = time.time()
-        session_info = f"[Session: {session_id}] " if session_id else ""
-        print(f"[PROCESS] {session_info}Start Agent Query: {user_query}")
+        if not self.query_tools:
+            return {"answer": "Nessuna fonte dati configurata.", "source_type": "none"}
+            
+        print(f"[PROCESS] Session: {session_id} | Query: {user_query}")
         
         try:
-            # 1. Retrieve or init history as ChatMessage objects
             if session_id not in self.session_memory:
                 self.session_memory[session_id] = []
-            
             history = self.session_memory[session_id]
             
-            # 2. Construct the current user message with site context
-            display_query = user_query
-            if site_id:
-                user_msg_content = f"{user_query} (siteid: {site_id})"
-            else:
-                user_msg_content = user_query
+            # Clean query
+            enriched_query = user_query
+            
+            current_context = []
+            if site_id or target:
+                parts = []
+                if site_id: parts.append(f"siteid={site_id}")
+                if target: parts.append(f"codice_percorso={target}")
+                hint = ChatMessage(
+                    role=MessageRole.SYSTEM, 
+                    content=f"CONTESTO ATTUALE: {', '.join(parts)}. Includi sempre siteid nelle query SQL per artistwork/pathway. Nota: la tabella 'room' non ha siteid, usala solo in JOIN con artistwork."
+                )
+                current_context.append(hint)
 
-            # 3. Call agent with history
-            print(f"[PROCESS] Agent thinking (Native Context Mode)...")
-            response = await self.agent.run(user_msg=user_msg_content, chat_history=history)
-            
-            # 4. Update memory with BOTH messages
-            history.append(ChatMessage(role=MessageRole.USER, content=user_msg_content))
-            history.append(ChatMessage(role=MessageRole.ASSISTANT, content=str(response)))
-            
-            # Trim history to keep context manageable (last 10 messages)
-            if len(history) > 10:
-                self.session_memory[session_id] = history[-10:]
+            # 5. Get Agent Response
+            agent_start = time.time()
+            response = await self.agent.run(user_msg=enriched_query, chat_history=current_context + history)
+            answer = str(response)
+            print(f"[LATENCY] Agent loop: {time.time() - agent_start:.2f}s")
 
-            elapsed = time.time() - start_time
-            print(f"[PROCESS] Query complete in {elapsed:.2f}s")
+            # --- AUTHORITATIVE BYPASS STRATEGY ---
+            if self.last_sql_result:
+                print(f"[BYPASS] Triggering authoritative bypass")
+                answer = self.last_sql_result
             
-            return {
-                "answer": str(response),
-                "source_type": "hybrid"
-            }
+            # Reset buffer
+            self.last_sql_result = None
+            
+            # SANITIZE: Remove any leaked technical details
+            answer = self._sanitize_response(answer)
+            
+            # Save original query (not enriched) in history
+            history.append(ChatMessage(role=MessageRole.USER, content=user_query))
+            history.append(ChatMessage(role=MessageRole.ASSISTANT, content=answer))
+            self.session_memory[session_id] = history[-10:]
+
+            print(f"[LATENCY] Total query: {time.time() - start_time:.2f}s")
+            return {"answer": answer, "source_type": "hybrid"}
         except Exception as e:
-            print(f"[CRITICAL ERROR] Pipeline query failed: {str(e)}")
             traceback.print_exc()
-            return {
-                "answer": f"Errore tecnico: {str(e)}",
-                "source_type": "error"
-            }
+            return {"answer": f"Si è verificato un errore: {str(e)}", "source_type": "error"}
