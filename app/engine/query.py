@@ -56,8 +56,17 @@ class TenantQueryPipeline:
 
         # 3. Buffer for large SQL results to prevent summarization
         self.last_sql_result = None
+        self.db_intel = {}
         
-        # 3. Setup SQL Engine (if db provided)
+        # Load local database intelligence (DDL, Samples)
+        try:
+            intel_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "data", "db_intelligence.json")
+            if os.path.exists(intel_path):
+                with open(intel_path, 'r') as f:
+                    self.db_intel = json.load(f)
+                print(f"--- Loaded Intelligence for {len(self.db_intel.get('tables', {}))} tables ---")
+        except Exception as e:
+            print(f"[ERROR] Failed to load db_intelligence: {e}")
         if sql_connection_str:
             print(f"--- Init SQL Database (Schema: {self.schema_name or 'public'}) ---")
             
@@ -137,25 +146,35 @@ class TenantQueryPipeline:
                 "5. SEGRETEZZA: Non parlare mai di SQL, database o tool. Parla come un esperto umano.\n"
             )
 
-            # 3. Setup SQL Engine with Enhanced Semantic Mapping
-            
-            # Create a more structured prompt for the SQL engine
+            # Construct a rich DDL context dynamically
+            ddl_blocks = []
+            sample_blocks = []
+            schema_prefix = self.db_intel.get("schema", "guide")
+            for t_name, t_info in self.db_intel.get("tables", {}).items():
+                ddl_blocks.append(t_info["ddl"])
+                if t_info.get("sample_values"):
+                    samples = ", ".join([f"{k}: {v}" for k, v in t_info["sample_values"].items()])
+                    sample_blocks.append(f"Table {t_name} samples -> {samples}")
+
             TEXT_TO_SQL_PROMPT_STR = (
-                "Sei un assistente esperto SQL per il Museo Bailo. Scrivi query PostgreSQL precise.\n"
-                "Usa il dizionario per mappare i concetti utente alle tabelle:\n"
-                "{context_str}\n\n"
-                "REGOLE SQL:\n"
-                "1. DATABASE LINGUA: Usa termini italiani per i filtri (es. 'OLIO', 'MARMO').\n"
-                "2. TIPOLOGIE: Per 'Dipinti' filtra per artistcategorydescription = 'PITTORI' o techniquedescription ILIKE '%%OLIO%%'. Per 'Sculture' filtra per artistcategorydescription = 'SCULTORI' o techniquedescription ILIKE '%%MARMO%%'.\n"
-                "3. PRECISIONE: Se l'utente cerca un artista specifico, filtra per artistname ILIKE '%%nome%%'.\n"
-                "4. SALE: Se l'utente menziona una sala (es. 'sala 9'), DEVI filtrare per roomname ILIKE '%%sala 9%%'. MAI usare il numero come roomid.\n"
-                "5. SCOPE: Includi 'siteid = 1' solo per 'artistwork' e 'pathway'. La tabella 'room' NON ha siteid.\n"
-                "6. BIOGRAFIE: Per domande su un artista ('chi è...', 'parlami di...'), SELEZIONA SEMPRE 'artistdescription'.\n"
-                "7. OUTPUT: Restituisci esclusivamente il codice SQL, senza commenti, senza scuse e senza preamboli. Se non sei sicuro, scrivi una query di base sulla tabella 'artistwork'.\n\n"
-                "Schema DB:\n{schema}\n"
+                "Sei un esperto Senior PostgreSQL per il Museo Bailo. Genera query sintatticamente perfette.\n\n"
+                "REGOLE CRITICHE:\n"
+                "1. NOMI TABELLE: NON usare mai prefissi di schema. Usa nomi semplici (es. 'artistwork', non 'guide.artistwork').\n"
+                "2. Niente chiacchiere: Restituisci esclusivamente il codice SQL iniziando con SELECT. Nessun commento o spiegazione.\n"
+                "3. siteid: Usa sempre 'siteid = 1' per artistwork, artist, site e pathway.\n"
+                "4. PULIZIA: Se i dati nel DB contengono tag HTML (es. <p>, <div>), ignorali e restituisci solo il testo pulito.\n\n"
+                "STRUTTURA REALE (DDL):\n"
+                "{schema_ddl}\n\n"
+                "CAMPIONI DATI (FONDAMENTALI PER I FILTRI):\n"
+                "{samples_hint}\n\n"
+                "GOLDEN QUERIES (ESEMPI):\n"
+                "Q: opere sala 9 -> SELECT aw.artistworktitle FROM artistwork aw JOIN room r ON aw.roomid = r.roomid WHERE r.roomname ILIKE '%%SALA 9%%' AND aw.siteid = 1;\n"
+                "Q: chi è Martini -> SELECT artistname, artistdescription, biography FROM artist WHERE artistname ILIKE '%%Arturo Martini%%' AND siteid = 1;\n"
+                "Q: opere marmo Canova -> SELECT aw.artistworktitle FROM artistwork aw JOIN artist a ON aw.artistid = a.artistid JOIN technique t ON aw.techniqueid = t.techniqueid WHERE a.artistname ILIKE '%%Antonio Canova%%' AND t.techniquedescription ILIKE '%%MARMO%%';\n"
+                "Q: indirizzo museo -> SELECT address, city FROM site WHERE siteid = 1;\n\n"
                 "Domanda: {query_str}\n"
                 "SQLQuery: "
-            )
+            ).replace("{schema_ddl}", "\n".join(ddl_blocks)).replace("{samples_hint}", "\n".join(sample_blocks))
             
             # Formattiamo il dizionario per il SQL Engine
             sql_context_lines = ["DIZIONARIO TABELLE E COLONNE:"]

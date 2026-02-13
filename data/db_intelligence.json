@@ -1,0 +1,601 @@
+{
+  "schema": "guide",
+  "tables": {
+    "artistwork": {
+      "columns": {
+        "artistworkid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "artistworkcode": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "artistworktitle": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "artistworkdescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "artistid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "inventorynumber": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "realizationyear": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "realizationdatedescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "techniqueid": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "supportdescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "height": {
+          "type": "numeric",
+          "nullable": "YES"
+        },
+        "width": {
+          "type": "numeric",
+          "nullable": "YES"
+        },
+        "depth": {
+          "type": "numeric",
+          "nullable": "YES"
+        },
+        "provenance": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "createdate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "modifieddate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "user_ins": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "user_upd": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "roomid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "lfwebcontentid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "imageref": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "artistwork_alias": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "siteid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "guideid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "xplantlocation": {
+          "type": "numeric",
+          "nullable": "YES"
+        },
+        "yplantlocation": {
+          "type": "numeric",
+          "nullable": "YES"
+        }
+      },
+      "ddl": "CREATE TABLE artistwork (\n  artistworkid BIGINT,\n  artistworkcode CHARACTER VARYING,\n  artistworktitle CHARACTER VARYING,\n  artistworkdescription CHARACTER VARYING,\n  artistid BIGINT,\n  inventorynumber CHARACTER VARYING,\n  realizationyear CHARACTER VARYING,\n  realizationdatedescription CHARACTER VARYING,\n  techniqueid CHARACTER VARYING,\n  supportdescription CHARACTER VARYING,\n  height NUMERIC,\n  width NUMERIC,\n  depth NUMERIC,\n  provenance CHARACTER VARYING,\n  createdate TIMESTAMP WITHOUT TIME ZONE,\n  modifieddate TIMESTAMP WITHOUT TIME ZONE,\n  user_ins CHARACTER VARYING,\n  user_upd CHARACTER VARYING,\n  roomid BIGINT,\n  lfwebcontentid BIGINT,\n  imageref CHARACTER VARYING,\n  artistwork_alias CHARACTER VARYING,\n  siteid BIGINT,\n  guideid BIGINT,\n  xplantlocation NUMERIC,\n  yplantlocation NUMERIC\n);",
+      "sample_values": {
+        "artistworktitle": [
+          "Dale color a la vida",
+          "Tacchini Sensoriale",
+          "Ritratto del Cavalier Pasquale Moresco",
+          "Il Sole Ritrovato",
+          "Recuerdo \u2013 Elena Hidalgo",
+          "Venere dei Porti Sensoriale",
+          "GEPPETTO",
+          "TEST001",
+          "Ritratto di famiglia/Gruppo della famiglia del pittore con primo autoritratto",
+          "Affresco Il ponte dei bambini "
+        ]
+      }
+    },
+    "artist": {
+      "columns": {
+        "artistid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "artistcode": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "artistname": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "artistdescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "birthplace": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "birthdate": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "deathplace": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "deathdate": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "biography": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "createdate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "modifieddate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "user_ins": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "user_upd": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "lfwebcontentid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "artistcategoryid": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "artist_alias": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "siteid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "guideid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "companyid": {
+          "type": "bigint",
+          "nullable": "NO"
+        }
+      },
+      "ddl": "CREATE TABLE artist (\n  artistid BIGINT,\n  artistcode CHARACTER VARYING,\n  artistname CHARACTER VARYING,\n  artistdescription CHARACTER VARYING,\n  birthplace CHARACTER VARYING,\n  birthdate CHARACTER VARYING,\n  deathplace CHARACTER VARYING,\n  deathdate CHARACTER VARYING,\n  biography CHARACTER VARYING,\n  createdate TIMESTAMP WITHOUT TIME ZONE,\n  modifieddate TIMESTAMP WITHOUT TIME ZONE,\n  user_ins CHARACTER VARYING,\n  user_upd CHARACTER VARYING,\n  lfwebcontentid BIGINT,\n  artistcategoryid CHARACTER VARYING,\n  artist_alias CHARACTER VARYING,\n  siteid BIGINT,\n  guideid BIGINT,\n  companyid BIGINT\n);",
+      "sample_values": {
+        "artistname": [
+          "Artista creatore multisensoriale",
+          "Elena Hidalgo",
+          "Luigi Zandomeneghi",
+          "Raul Ruiz El Ni\u00f1o de las Pinturas",
+          "Sfhir",
+          "Guido Cacciapuoti",
+          "Nego Graff Art",
+          "Francesco Hayez",
+          "\u0160t\u011bp\u00e1n (Stephan) Zav\u0159el",
+          "Jos\u00e9 Antonio -  jonibboydaes"
+        ]
+      }
+    },
+    "room": {
+      "columns": {
+        "roomid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "roomcode": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "roomname": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "roomdescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "floorid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "xplantlocation": {
+          "type": "numeric",
+          "nullable": "YES"
+        },
+        "yplantlocation": {
+          "type": "numeric",
+          "nullable": "YES"
+        },
+        "height": {
+          "type": "numeric",
+          "nullable": "YES"
+        },
+        "size": {
+          "type": "numeric",
+          "nullable": "YES"
+        },
+        "createdate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "modifieddate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "user_ins": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "user_upd": {
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      },
+      "ddl": "CREATE TABLE room (\n  roomid BIGINT,\n  roomcode CHARACTER VARYING,\n  roomname CHARACTER VARYING,\n  roomdescription CHARACTER VARYING,\n  floorid BIGINT,\n  xplantlocation NUMERIC,\n  yplantlocation NUMERIC,\n  height NUMERIC,\n  size NUMERIC,\n  createdate TIMESTAMP WITHOUT TIME ZONE,\n  modifieddate TIMESTAMP WITHOUT TIME ZONE,\n  user_ins CHARACTER VARYING,\n  user_upd CHARACTER VARYING\n);",
+      "sample_values": {
+        "roomname": [
+          "STANZA 11 PIANO TERRA",
+          "CORRIDOIO 6",
+          "Calle Nieto Bonal",
+          "PIAZZA CENTRALE",
+          "STANZA 15 PIANO TERRA",
+          "Calle G\u00fctenberg",
+          " Calle Juan Picornell",
+          "SALA 18",
+          "STANZA 12 PIANO TERRA",
+          "SALA 5"
+        ]
+      }
+    },
+    "pathway": {
+      "columns": {
+        "pathwayid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "pathwaycode": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "pathwayname": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "pathwaydescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "pathwaytypeid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "beaconuse": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "nfcuse": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "qrcodeuse": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "createdate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "modifieddate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "user_ins": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "user_upd": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "lfwebcontentid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "basepathway": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "pathway_alias": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "siteid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "guideid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "durationmin": {
+          "type": "integer",
+          "nullable": "NO"
+        }
+      },
+      "ddl": "CREATE TABLE pathway (\n  pathwayid BIGINT,\n  pathwaycode CHARACTER VARYING,\n  pathwayname CHARACTER VARYING,\n  pathwaydescription CHARACTER VARYING,\n  pathwaytypeid CHARACTER VARYING,\n  beaconuse CHARACTER VARYING,\n  nfcuse CHARACTER VARYING,\n  qrcodeuse CHARACTER VARYING,\n  createdate TIMESTAMP WITHOUT TIME ZONE,\n  modifieddate TIMESTAMP WITHOUT TIME ZONE,\n  user_ins CHARACTER VARYING,\n  user_upd CHARACTER VARYING,\n  lfwebcontentid BIGINT,\n  basepathway CHARACTER VARYING,\n  pathway_alias CHARACTER VARYING,\n  siteid BIGINT,\n  guideid BIGINT,\n  durationmin INTEGER\n);",
+      "sample_values": {
+        "pathwayname": [
+          "PERCORSO VITA QUOTIDIANA",
+          "RUTA BARRIO OESTE",
+          "IL MUSEO",
+          "PERCORSO MODA",
+          "RUTA DALE COLOR A LA VIDA",
+          "PERCORSO ANIMALI",
+          "Conosci la piattaforma GuideMyVisit",
+          "Sarmede, il paese della fiaba",
+          "TEST P001",
+          "PERCORSO SCULTURA"
+        ],
+        "pathwaydescription": [
+          "<p>Descrizione Percorso Ritratti</p>\n",
+          "<p>PERCORSO DEDICATO ALLE SCULTURE 2024</p>",
+          "DESCRIZIONE PERCORSO STANDARD",
+          "<p>Percorso Moda 2</p>",
+          "<p>Descrizione del percorso&nbsp;Il Filo della Storia - Via XX Settembre</p>\n",
+          "<p>Percorso Animali</p>",
+          "<p>RUTA DALE COLOR A LA VIDA</p>\n",
+          "<p>Percorso Vita Quotidiana</p>\n",
+          "<div class=\"col-lg-6 pt-5 pt-lg-1 \">\n<div class=\"h4 fw-light animation-delay fade-in animate\">\n<p>Immaginazione, creativit&agrave;, fantasia. Un paese che &egrave; insieme un luogo fisico e della mente. Un angolo di mondo dove si intrecciano storie, si costruisce speranza, si tracciano pennellate di colori che formano sentieri sempre nuovi e ancora tutti da esplorare.</p>\n</div>\n\n<div class=\"animation-delay fade-in animate\">\n<p>Sarmede &egrave; tutto questo: un esperimento nato dal pensiero visionario di &Scaron;t\u011bp&aacute;n Zav\u0159el e cresciuto grazie alla passione di una comunit&agrave; che qui ha messo radici, per poi espandersi in un labirinto di fioriture che avvolge ormai tutto il mondo.<br />\nUna mostra che da oltre quarant&rsquo;anni spalanca le finestre sul mondo dell&rsquo;illustrazione e della narrativa per l&rsquo;infanzia. Una Scuola Internazionale d&rsquo;Illustrazione dove si incontrano artisti dalle sensibilit&agrave; multiformi, pronti a confrontarsi tra i banchi di un&rsquo;aula o alle tavole rotonde di un simposio.</p>\n\n<p>Una fondazione che raccoglie e nutre i semi lasciati da tutti coloro che visitano le stanze della Casa della Fantasia, fulcro di un universo che si espande nelle strade e nelle piazze del paese della fiaba. Negli affreschi che decorano la facciata, il portico e l&rsquo;ingresso del Municipio, nelle tavole originali che costituiscono il nucleo fondante del Museo &Scaron;t\u011bp&aacute;n Zav\u0159el.</p>\n</div>\n</div>\n",
+          "<p>Conosci la piattaforma GuideMyVisit</p>\n"
+        ]
+      }
+    },
+    "technique": {
+      "columns": {
+        "techniqueid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "techniquecode": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "techniquedescription": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "createdate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "modifieddate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "user_ins": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "user_upd": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "languageid": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "companyid": {
+          "type": "bigint",
+          "nullable": "NO"
+        }
+      },
+      "ddl": "CREATE TABLE technique (\n  techniqueid CHARACTER VARYING,\n  techniquecode CHARACTER VARYING,\n  techniquedescription CHARACTER VARYING,\n  createdate TIMESTAMP WITHOUT TIME ZONE,\n  modifieddate TIMESTAMP WITHOUT TIME ZONE,\n  user_ins CHARACTER VARYING,\n  user_upd CHARACTER VARYING,\n  languageid CHARACTER VARYING,\n  companyid BIGINT\n);",
+      "sample_values": {
+        "techniquedescription": [
+          "\u00d3LEO SOBRE CART\u00d3N",
+          " Wall painting (spray and acrylics on the wall)",
+          "OLIO",
+          "OIL ON BOARD",
+          "Pintura mural (spray y acr\u00edlicos sobre muro)",
+          "YESO",
+          "TERRACOTTA",
+          "GESSO PATINATO",
+          "PASTEL SOBRE PAPEL",
+          "BRONZE"
+        ]
+      }
+    },
+    "artistcategory": {
+      "columns": {
+        "artistcategoryid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "artistcategorycode": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "artistcategorydescription": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "languageid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "createdate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "modifieddate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "user_ins": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "user_upd": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "companyid": {
+          "type": "bigint",
+          "nullable": "NO"
+        }
+      },
+      "ddl": "CREATE TABLE artistcategory (\n  artistcategoryid CHARACTER VARYING,\n  artistcategorycode CHARACTER VARYING,\n  artistcategorydescription CHARACTER VARYING,\n  languageid CHARACTER VARYING,\n  createdate TIMESTAMP WITHOUT TIME ZONE,\n  modifieddate TIMESTAMP WITHOUT TIME ZONE,\n  user_ins CHARACTER VARYING,\n  user_upd CHARACTER VARYING,\n  companyid BIGINT\n);",
+      "sample_values": {
+        "artistcategorydescription": [
+          "PINTORES - ILUSTRADORES",
+          "SCULTORI",
+          "MUSEUM DIRECTORS",
+          "PINTORES",
+          "PAINTERS",
+          "DIRETTORI",
+          "SCULPTORS",
+          "PITTORI - ILLUSTRATORI",
+          "ESCULTORES",
+          "PAINTERS - ILLUSTRATORS"
+        ]
+      }
+    },
+    "site": {
+      "columns": {
+        "siteid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "sitecode": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "sitename": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "sitedescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "history": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "architecture": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "address": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "city": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "region": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "country": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "telephone": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "cell": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "email": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "createdate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "modifieddate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "user_ins": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "user_upd": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "companyid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "logo_link": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "lf_groupid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "webdomain": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "webpathuri": {
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      },
+      "ddl": "CREATE TABLE site (\n  siteid BIGINT,\n  sitecode CHARACTER VARYING,\n  sitename CHARACTER VARYING,\n  sitedescription CHARACTER VARYING,\n  history CHARACTER VARYING,\n  architecture CHARACTER VARYING,\n  address CHARACTER VARYING,\n  city CHARACTER VARYING,\n  region CHARACTER VARYING,\n  country CHARACTER VARYING,\n  telephone CHARACTER VARYING,\n  cell CHARACTER VARYING,\n  email CHARACTER VARYING,\n  createdate TIMESTAMP WITHOUT TIME ZONE,\n  modifieddate TIMESTAMP WITHOUT TIME ZONE,\n  user_ins CHARACTER VARYING,\n  user_upd CHARACTER VARYING,\n  companyid BIGINT,\n  logo_link CHARACTER VARYING,\n  lf_groupid BIGINT,\n  webdomain CHARACTER VARYING,\n  webpathuri CHARACTER VARYING\n);",
+      "sample_values": {}
+    }
+  }
+}
