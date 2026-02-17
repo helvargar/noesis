@@ -1,0 +1,294 @@
+{
+  "timestamp": "2026-02-16T12:49:06.988810",
+  "server": "http://localhost:8000",
+  "tenant_id": "tenant_b4b6daaa",
+  "summary": {
+    "total": 25,
+    "passed": 25,
+    "failed": 0,
+    "success_rate": 100.0,
+    "avg_response_time_s": 2.31,
+    "grade": "🏆 PERFETTO"
+  },
+  "categories": {
+    "ricerca_artista": {
+      "passed": 4,
+      "total": 4
+    },
+    "ricerca_sala": {
+      "passed": 2,
+      "total": 2
+    },
+    "info_museo": {
+      "passed": 2,
+      "total": 2
+    },
+    "ricerca_tecnica": {
+      "passed": 2,
+      "total": 2
+    },
+    "saluto": {
+      "passed": 2,
+      "total": 2
+    },
+    "query_complessa": {
+      "passed": 2,
+      "total": 2
+    },
+    "robustezza": {
+      "passed": 3,
+      "total": 3
+    },
+    "sanitizzazione": {
+      "passed": 2,
+      "total": 2
+    },
+    "negativo": {
+      "passed": 2,
+      "total": 2
+    },
+    "ilike_parziale": {
+      "passed": 1,
+      "total": 1
+    },
+    "autocorrezione": {
+      "passed": 1,
+      "total": 1
+    },
+    "percorso": {
+      "passed": 1,
+      "total": 1
+    },
+    "performance": {
+      "passed": 1,
+      "total": 1
+    }
+  },
+  "tests": [
+    {
+      "test_id": "ART_01",
+      "category": "ricerca_artista",
+      "query": "Chi è Erler?",
+      "passed": true,
+      "response_time_s": 2.53,
+      "errors": [],
+      "response_preview": "Giulio Ettore Erler è nato a Oderzo nel 1876. Ha studiato all'Accademia di Belle Arti di Venezia e poi a Milano, all'Accademia di Brera. Un viaggio a Parigi lo ha portato a conoscere gli impressionist..."
+    },
+    {
+      "test_id": "ART_02",
+      "category": "ricerca_artista",
+      "query": "Parlami di Canova",
+      "passed": true,
+      "response_time_s": 3.03,
+      "errors": [],
+      "response_preview": "Antonio Canova nacque il 1º novembre 1757 a Possagno, in una famiglia di scalpellini. Cresciuto dal nonno Pasino, apprese l'amore per la scultura. Studiò a Venezia grazie al nobile Giovanni Falier. La..."
+    },
+    {
+      "test_id": "ART_03",
+      "category": "ricerca_artista",
+      "query": "Chi è Arturo Martini?",
+      "passed": true,
+      "response_time_s": 2.22,
+      "errors": [],
+      "response_preview": "[[Arturo Martini - \nArturo Martini nasce a Treviso nel 1899 in una famiglia con modeste risorse economiche. Fin dall'infanzia dimostra talento artistico e, grazie al supporto della madre, inizia a fre..."
+    },
+    {
+      "test_id": "ART_04",
+      "category": "ricerca_artista",
+      "query": "Dimmi qualcosa su Martini",
+      "passed": true,
+      "response_time_s": 3.32,
+      "errors": [],
+      "response_preview": "Arturo Martini fu un artista di Treviso nato nel 1899. Dimostrò fin da giovane un grande talento artistico, iniziando a lavorare con l'argilla e la terracotta. Dopo aver viaggiato e appreso diverse te..."
+    },
+    {
+      "test_id": "ROOM_01",
+      "category": "ricerca_sala",
+      "query": "Quali opere ci sono nella sala 9?",
+      "passed": true,
+      "response_time_s": 2.5,
+      "errors": [],
+      "response_preview": "Nella sala 9 del museo puoi ammirare due splendide opere: \"Fanciulla piena d'amore\" e \"Donne in maschera\". Ti consiglio di non perderle!"
+    },
+    {
+      "test_id": "ROOM_02",
+      "category": "ricerca_sala",
+      "query": "Cosa posso vedere nella sala 1?",
+      "passed": true,
+      "response_time_s": 2.18,
+      "errors": [],
+      "response_preview": "Mi scuso, ma al momento non ho informazioni specifiche sulle opere esposte nella sala 1."
+    },
+    {
+      "test_id": "MUSEO_01",
+      "category": "info_museo",
+      "query": "Qual è l'indirizzo del museo?",
+      "passed": true,
+      "response_time_s": 1.97,
+      "errors": [],
+      "response_preview": "L'indirizzo del museo è Borgo Cavour, 24."
+    },
+    {
+      "test_id": "MUSEO_02",
+      "category": "info_museo",
+      "query": "Come si chiama il museo?",
+      "passed": true,
+      "response_time_s": 1.79,
+      "errors": [],
+      "response_preview": "Il museo si chiama BAILO."
+    },
+    {
+      "test_id": "TECH_01",
+      "category": "ricerca_tecnica",
+      "query": "Quali opere sono in marmo?",
+      "passed": true,
+      "response_time_s": 2.41,
+      "errors": [],
+      "response_preview": "Certamente! Al Museo Bailo abbiamo due opere realizzate in marmo: il \"Busto di Antonio Canova\" e \"LAGUNA VENEZIANA\"."
+    },
+    {
+      "test_id": "TECH_02",
+      "category": "ricerca_tecnica",
+      "query": "Opere in bronzo",
+      "passed": true,
+      "response_time_s": 2.69,
+      "errors": [],
+      "response_preview": "Mi dispiace, non ho trovato opere in bronzo nel database del museo."
+    },
+    {
+      "test_id": "GREET_01",
+      "category": "saluto",
+      "query": "Ciao!",
+      "passed": true,
+      "response_time_s": 0.83,
+      "errors": [],
+      "response_preview": "Ben ritrovato! Come posso assisterti oggi nella tua visita virtuale al Museo Bailo? Sei interessato a scoprire qualche artista in particolare, un'opera specifica, o magari esplorare una delle nostre a..."
+    },
+    {
+      "test_id": "GREET_02",
+      "category": "saluto",
+      "query": "Buongiorno, come funziona la guida?",
+      "passed": true,
+      "response_time_s": 0.58,
+      "errors": [],
+      "response_preview": "Buongiorno! Sono Sei Gyp, la guida virtuale del Museo Bailo. Sono qui per rispondere alle sue domande sulle opere, gli artisti, le sale e le collezioni del museo. Non esiti a chiedere!"
+    },
+    {
+      "test_id": "JOIN_01",
+      "category": "query_complessa",
+      "query": "Quali sono le opere di Canova?",
+      "passed": true,
+      "response_time_s": 2.46,
+      "errors": [],
+      "response_preview": "Certamente! Al Museo Bailo abbiamo una splendida opera di Canova, intitolata \"Venere\"."
+    },
+    {
+      "test_id": "JOIN_02",
+      "category": "query_complessa",
+      "query": "Opere di Martini in marmo",
+      "passed": true,
+      "response_time_s": 2.95,
+      "errors": [],
+      "response_preview": "Certamente! Al Museo Bailo abbiamo una scultura di Martini in marmo intitolata \"LAGUNA VENEZIANA\"."
+    },
+    {
+      "test_id": "ROBUST_01",
+      "category": "robustezza",
+      "query": "Cerca Erler",
+      "passed": true,
+      "response_time_s": 2.05,
+      "errors": [],
+      "response_preview": "Giulio Ettore Erler! Nato a Oderzo nel 1876, studiò all'Accademia di Belle Arti di Venezia e poi a Milano. Un viaggio a Parigi lo portò a contatto con gli impressionisti."
+    },
+    {
+      "test_id": "ROBUST_02",
+      "category": "robustezza",
+      "query": "canova marmo",
+      "passed": true,
+      "response_time_s": 3.24,
+      "errors": [],
+      "response_preview": "Ah, Canova e il marmo! Un binomio perfetto. Conosci la \"Venere\" di Canova? È una scultura meravigliosa realizzata proprio in marmo."
+    },
+    {
+      "test_id": "ROBUST_03",
+      "category": "robustezza",
+      "query": "Chi è quell'artista di nome Erler che è nato a Oderzo?",
+      "passed": true,
+      "response_time_s": 2.4,
+      "errors": [],
+      "response_preview": "Giulio Ettore Erler è nato a Oderzo nel 1876. Ha studiato all'Accademia di Belle Arti di Venezia e poi a Milano, all'Accademia di Brera. Durante un viaggio a Parigi, ha scoperto l'Impressionismo."
+    },
+    {
+      "test_id": "SANITIZE_01",
+      "category": "sanitizzazione",
+      "query": "Qual è la biografia di Canova?",
+      "passed": true,
+      "response_time_s": 1.86,
+      "errors": [],
+      "response_preview": "[[Antonio Canova nacque il 1º novembre 1757 a Possagno, tra le colline ai piedi del Monte Grappa, in una famiglia di scalpellini. Perso il padre a soli quattro anni, fu cresciuto dal nonno Pasino, un ..."
+    },
+    {
+      "test_id": "SANITIZE_02",
+      "category": "sanitizzazione",
+      "query": "Raccontami la storia di Arturo Martini",
+      "passed": true,
+      "response_time_s": 3.15,
+      "errors": [],
+      "response_preview": "Arturo Martini è una figura di spicco nel panorama artistico italiano del Novecento. Scultore di straordinaria sensibilità e originalità, Martini ha saputo interpretare la tradizione classica con uno ..."
+    },
+    {
+      "test_id": "NEGAT_01",
+      "category": "negativo",
+      "query": "Chi è Pablo Picasso?",
+      "passed": true,
+      "response_time_s": 2.5,
+      "errors": [],
+      "response_preview": "Mi scuso, ma sembra che le informazioni su Pablo Picasso non siano attualmente disponibili nel nostro database."
+    },
+    {
+      "test_id": "NEGAT_02",
+      "category": "negativo",
+      "query": "Dove si trova la Gioconda?",
+      "passed": true,
+      "response_time_s": 0.62,
+      "errors": [],
+      "response_preview": "Mi dispiace, non ho le informazioni sulla posizione della Gioconda."
+    },
+    {
+      "test_id": "ILIKE_01",
+      "category": "ilike_parziale",
+      "query": "artisti che contengono 'art' nel nome",
+      "passed": true,
+      "response_time_s": 2.01,
+      "errors": [],
+      "response_preview": "[[DIRECT_DISPLAYArtista creatore multisensoriale - \nMultisensoriale \n - \n / \n\nArturo Martini - \nArturo Martini nasce a Treviso nel 1899 in una famiglia con modeste risorse economiche. Fin dall'infanzi..."
+    },
+    {
+      "test_id": "SELFCORR_01",
+      "category": "autocorrezione",
+      "query": "Quante opere ha fatto ogni artista?",
+      "passed": true,
+      "response_time_s": 3.28,
+      "errors": [],
+      "response_preview": "Certamente! Ecco il numero di opere per ciascun artista presente nella collezione del Museo Bailo (siteid=1):\n\n*   Lino Selvatico - 1 opera\n*   Bepi Fabiano - 2 opere\n*   Eugenio Bosa - 1 opera\n*   Lu..."
+    },
+    {
+      "test_id": "PATHWAY_01",
+      "category": "percorso",
+      "query": "Quali percorsi sono disponibili?",
+      "passed": true,
+      "response_time_s": 2.49,
+      "errors": [],
+      "response_preview": "Certamente! Al Museo Bailo sono disponibili diversi percorsi tematici: \"PERCORSO SCULTURA\", dedicato alle sculture del 2024, \"PERCORSO ANIMALI\", \"PERCORSO MODA\", \"PERCORSO RITRATTI\", \"PERCORSO VITA QU..."
+    },
+    {
+      "test_id": "LATENCY_01",
+      "category": "performance",
+      "query": "Chi è Canova?",
+      "passed": true,
+      "response_time_s": 2.57,
+      "errors": [],
+      "response_preview": "Antonio Canova nacque il 1º novembre 1757 a Possagno, in una famiglia di scalpellini. Fu cresciuto dal nonno Pasino, che gli trasmise l’amore per la scultura. Grazie al sostegno del nobile veneziano G..."
+    }
+  ]
+}

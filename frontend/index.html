@@ -311,6 +311,12 @@
                 </div>
             </div>
             <div class="modal-footer chat-modal-footer">
+                <div class="chat-options"
+                    style="margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="checkbox" id="chat-stream-toggle" checked style="cursor: pointer;">
+                    <label for="chat-stream-toggle"
+                        style="font-size: 0.8rem; color: var(--text-muted); cursor: pointer;">Abilita Streaming</label>
+                </div>
                 <form id="chat-form" class="chat-form">
                     <input type="text" id="chat-input" placeholder="Chiedi qualcosa..." required autocomplete="off">
                     <button type="submit" class="btn btn-primary">

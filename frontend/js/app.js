@@ -493,6 +493,7 @@ function addChatMessage(content, type) {
 async function sendChatMessage() {
     const input = document.getElementById('chat-input');
     const btn = document.querySelector('#chat-form button');
+    const isStream = document.getElementById('chat-stream-toggle').checked;
     const query = input.value.trim();
     if (!query || !chatActiveTenantId) return;
 
@@ -500,27 +501,62 @@ async function sendChatMessage() {
     btn.disabled = true;
     addChatMessage(query, 'user');
 
-    const loadingMsg = addChatMessage('⌨️ L\'AI sta elaborando...', 'ai');
+    const loadingMsg = addChatMessage(isStream ? '' : '⌨️ L\'AI sta elaborando...', 'ai');
+    let fullContent = "";
 
     try {
-        const response = await api(`/tenants/${chatActiveTenantId}/chat`, {
-            method: 'POST',
-            body: JSON.stringify({
-                query,
-                session_id: chatSessionId,
-                site_id: "1" // Default site_id for testing (Bailo)
-            })
-        });
+        if (isStream) {
+            const response = await fetch(`${API_BASE}/tenants/${chatActiveTenantId}/chat`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({
+                    query,
+                    session_id: chatSessionId,
+                    site_id: "1",
+                    stream: true
+                })
+            });
 
-        loadingMsg.innerHTML = `<p>${response.answer}</p>`;
-        if (response.query_type) {
-            const info = document.createElement('div');
-            info.className = 'chat-message system';
-            info.innerHTML = `<p><small>Sorgente: ${response.query_type}</small></p>`;
-            document.getElementById('chat-history').appendChild(info);
+            if (!response.ok) throw new Error('Streaming request failed');
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value, { stream: true });
+                fullContent += chunk;
+
+                // Authoritative Bypass Check: if we see the bypass signal, we might want to clear and show only that
+                // However, the backend is now designed to yield the full bypass content.
+                // We'll just keep appending/updating.
+                loadingMsg.querySelector('p').textContent = fullContent.replace('[[DIRECT_DISPLAY]]', '');
+                document.getElementById('chat-history').scrollTop = document.getElementById('chat-history').scrollHeight;
+            }
+        } else {
+            const response = await api(`/tenants/${chatActiveTenantId}/chat`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    query,
+                    session_id: chatSessionId,
+                    site_id: "1"
+                })
+            });
+            loadingMsg.innerHTML = `<p>${response.answer}</p>`;
+            if (response.query_type) {
+                const info = document.createElement('div');
+                info.className = 'chat-message system';
+                info.innerHTML = `<p><small>Sorgente: ${response.query_type}</small></p>`;
+                document.getElementById('chat-history').appendChild(info);
+            }
         }
     } catch (error) {
-        loadingMsg.remove();
+        if (!fullContent) loadingMsg.remove();
         addChatMessage(`Errore: ${error.message}`, 'error');
     } finally {
         btn.disabled = false;

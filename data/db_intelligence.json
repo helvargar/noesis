@@ -596,6 +596,356 @@
       },
       "ddl": "CREATE TABLE site (\n  siteid BIGINT,\n  sitecode CHARACTER VARYING,\n  sitename CHARACTER VARYING,\n  sitedescription CHARACTER VARYING,\n  history CHARACTER VARYING,\n  architecture CHARACTER VARYING,\n  address CHARACTER VARYING,\n  city CHARACTER VARYING,\n  region CHARACTER VARYING,\n  country CHARACTER VARYING,\n  telephone CHARACTER VARYING,\n  cell CHARACTER VARYING,\n  email CHARACTER VARYING,\n  createdate TIMESTAMP WITHOUT TIME ZONE,\n  modifieddate TIMESTAMP WITHOUT TIME ZONE,\n  user_ins CHARACTER VARYING,\n  user_upd CHARACTER VARYING,\n  companyid BIGINT,\n  logo_link CHARACTER VARYING,\n  lf_groupid BIGINT,\n  webdomain CHARACTER VARYING,\n  webpathuri CHARACTER VARYING\n);",
       "sample_values": {}
+    },
+    "pathwayspot": {
+      "columns": {
+        "pathwayspotid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "pathwayid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "pathwayspotcode": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "pathwayspotname": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "pathwayspotdescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "sortingsequence": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "locationid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "artistworkid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "createdate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        },
+        "modifieddate": {
+          "type": "timestamp without time zone",
+          "nullable": "YES"
+        }
+      },
+      "ddl": "CREATE TABLE pathwayspot (\n  pathwayspotid BIGINT NOT NULL,\n  pathwayid BIGINT NOT NULL,\n  pathwayspotcode CHARACTER VARYING NOT NULL,\n  pathwayspotname CHARACTER VARYING NOT NULL,\n  pathwayspotdescription CHARACTER VARYING,\n  sortingsequence BIGINT NOT NULL,\n  locationid BIGINT,\n  artistworkid BIGINT,\n  createdate TIMESTAMP WITHOUT TIME ZONE,\n  modifieddate TIMESTAMP WITHOUT TIME ZONE\n);",
+      "sample_values": {}
+    },
+    "floor": {
+      "columns": {
+        "floorid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "buildingid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "floorcode": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "floorname": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "floordescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      },
+      "ddl": "CREATE TABLE floor (\n  floorid BIGINT NOT NULL,\n  buildingid BIGINT NOT NULL,\n  floorcode CHARACTER VARYING NOT NULL,\n  floorname CHARACTER VARYING NOT NULL,\n  floordescription CHARACTER VARYING\n);",
+      "sample_values": {
+        "floorname": [
+          "PIANO TERRA",
+          "PRIMO PIANO"
+        ]
+      }
+    },
+    "building": {
+      "columns": {
+        "buildingid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "siteid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "buildingname": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "buildingdescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      },
+      "ddl": "CREATE TABLE building (\n  buildingid BIGINT NOT NULL,\n  siteid BIGINT NOT NULL,\n  buildingname CHARACTER VARYING NOT NULL,\n  buildingdescription CHARACTER VARYING\n);",
+      "sample_values": {}
+    },
+    "location": {
+      "columns": {
+        "locationid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "locationname": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "floorid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "roomid": {
+          "type": "bigint",
+          "nullable": "YES"
+        },
+        "siteid": {
+          "type": "bigint",
+          "nullable": "NO"
+        }
+      },
+      "ddl": "CREATE TABLE location (\n  locationid BIGINT NOT NULL,\n  locationname CHARACTER VARYING NOT NULL,\n  floorid BIGINT NOT NULL,\n  roomid BIGINT,\n  siteid BIGINT NOT NULL\n);",
+      "sample_values": {}
+    },
+    "artistdescription": {
+      "columns": {
+        "artistid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "languageid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "artistdescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      },
+      "ddl": "CREATE TABLE artistdescription (\n  artistid BIGINT NOT NULL,\n  languageid CHARACTER VARYING NOT NULL,\n  artistdescription CHARACTER VARYING\n);",
+      "sample_values": {
+        "languageid": [
+          "it",
+          "en",
+          "fr",
+          "es"
+        ]
+      }
+    },
+    "pathwaydescription": {
+      "columns": {
+        "pathwayid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "languageid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "pathwayname": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "pathwaydescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      },
+      "ddl": "CREATE TABLE pathwaydescription (\n  pathwayid BIGINT NOT NULL,\n  languageid CHARACTER VARYING NOT NULL,\n  pathwayname CHARACTER VARYING NOT NULL,\n  pathwaydescription CHARACTER VARYING\n);",
+      "sample_values": {
+        "languageid": [
+          "it",
+          "en"
+        ]
+      }
+    },
+    "artistworklang": {
+      "columns": {
+        "artistworkid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "languageid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "artistworktitle": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "artistworkdescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      },
+      "ddl": "CREATE TABLE artistworklang (\n  artistworkid BIGINT NOT NULL,\n  languageid CHARACTER VARYING NOT NULL,\n  artistworktitle CHARACTER VARYING NOT NULL,\n  artistworkdescription CHARACTER VARYING\n);",
+      "sample_values": {
+        "languageid": [
+          "it",
+          "en",
+          "fr"
+        ]
+      }
+    },
+    "roomdesc": {
+      "columns": {
+        "roomid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "languageid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "description": {
+          "type": "character varying",
+          "nullable": "NO"
+        }
+      },
+      "ddl": "CREATE TABLE roomdesc (\n  roomid BIGINT NOT NULL,\n  languageid CHARACTER VARYING NOT NULL,\n  description CHARACTER VARYING NOT NULL\n);",
+      "sample_values": {}
+    },
+    "pathwaytype": {
+      "columns": {
+        "pathwaytypeid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "pathwaytypedescription": {
+          "type": "character varying",
+          "nullable": "NO"
+        }
+      },
+      "ddl": "CREATE TABLE pathwaytype (\n  pathwaytypeid CHARACTER VARYING NOT NULL,\n  pathwaytypedescription CHARACTER VARYING NOT NULL\n);",
+      "sample_values": {}
+    },
+    "locationdescription": {
+      "columns": {
+        "locationid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "languageid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "locationname": {
+          "type": "character varying",
+          "nullable": "YES"
+        },
+        "locationdescription": {
+          "type": "character varying",
+          "nullable": "YES"
+        }
+      },
+      "ddl": "CREATE TABLE locationdescription (\n  locationid BIGINT NOT NULL,\n  languageid CHARACTER VARYING NOT NULL,\n  locationname CHARACTER VARYING,\n  locationdescription CHARACTER VARYING\n);",
+      "sample_values": {
+        "languageid": [
+          "it",
+          "en"
+        ]
+      }
+    },
+    "site_language": {
+      "columns": {
+        "siteid": {
+          "type": "bigint",
+          "nullable": "NO"
+        },
+        "languageid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "default_language": {
+          "type": "character varying",
+          "nullable": "NO"
+        }
+      },
+      "ddl": "CREATE TABLE site_language (\n  siteid BIGINT NOT NULL,\n  languageid CHARACTER VARYING NOT NULL,\n  default_language CHARACTER VARYING NOT NULL\n);",
+      "sample_values": {
+        "languageid": [
+          "it",
+          "en",
+          "es"
+        ]
+      }
+    },
+    "language": {
+      "columns": {
+        "languageid": {
+          "type": "character varying",
+          "nullable": "NO"
+        },
+        "languagename": {
+          "type": "character varying",
+          "nullable": "NO"
+        }
+      },
+      "ddl": "CREATE TABLE language (\n  languageid CHARACTER VARYING NOT NULL,\n  languagename CHARACTER VARYING NOT NULL\n);",
+      "sample_values": {
+        "languageid": [
+          "it",
+          "en",
+          "es",
+          "fr"
+        ]
+      }
+    },
+    "vgmv_guide_information": {
+      "columns": {
+        "guidetitle": {
+          "type": "character varying"
+        },
+        "guidedescription": {
+          "type": "character varying"
+        }
+      },
+      "ddl": "CREATE VIEW vgmv_guide_information AS SELECT guidetitle, guidedescription, address, city, site_telephone, site_email FROM guide.vgmv_guide_information;",
+      "sample_values": {}
+    },
+    "vm_artistwork_lang": {
+      "columns": {
+        "artistworktitle": {
+          "type": "character varying"
+        },
+        "languageid": {
+          "type": "character varying"
+        }
+      },
+      "ddl": "CREATE VIEW vm_artistwork_lang AS SELECT artistworkid, languageid, artistworktitle, artistworkdescription, techniquedescription FROM guide.vm_artistwork_lang;",
+      "sample_values": {
+        "languageid": [
+          "it",
+          "en"
+        ]
+      }
+    },
+    "v_pathway": {
+      "columns": {
+        "pathwayname": {
+          "type": "character varying"
+        },
+        "pathwaytypedescription": {
+          "type": "character varying"
+        }
+      },
+      "ddl": "CREATE VIEW v_pathway AS SELECT pathwayid, pathwayname, pathwaydescription, pathwaytypedescription FROM guide.v_pathway;",
+      "sample_values": {}
     }
   }
 }

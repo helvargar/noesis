@@ -1,0 +1,380 @@
+{
+    "_meta": {
+        "version": "1.0",
+        "description": "Golden Dataset per la validazione del sistema Noesis/Gyp. Ogni test specifica una domanda e le keywords attese nella risposta.",
+        "rules": "Almeno UNA keyword del campo 'expected_keywords' deve apparire nella risposta (case-insensitive). Se 'expect_data' è true, la risposta NON deve contenere frasi di errore."
+    },
+    "tests": [
+        {
+            "id": "ART_01",
+            "category": "ricerca_artista",
+            "query": "Chi è Erler?",
+            "expected_keywords": [
+                "Giulio Ettore Erler",
+                "Erler",
+                "Oderzo"
+            ],
+            "forbidden_keywords": [
+                "non ho trovato",
+                "errore",
+                "non sono riuscito"
+            ],
+            "expect_data": true,
+            "description": "Ricerca parziale per cognome - deve trovare Giulio Ettore Erler"
+        },
+        {
+            "id": "ART_02",
+            "category": "ricerca_artista",
+            "query": "Parlami di Canova",
+            "expected_keywords": [
+                "Antonio Canova",
+                "Canova",
+                "Possagno"
+            ],
+            "forbidden_keywords": [
+                "non ho trovato",
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Ricerca parziale per cognome - deve trovare Antonio Canova"
+        },
+        {
+            "id": "ART_03",
+            "category": "ricerca_artista",
+            "query": "Chi è Arturo Martini?",
+            "expected_keywords": [
+                "Arturo Martini",
+                "Martini"
+            ],
+            "forbidden_keywords": [
+                "non ho trovato",
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Ricerca per nome completo"
+        },
+        {
+            "id": "ART_04",
+            "category": "ricerca_artista",
+            "query": "Dimmi qualcosa su Martini",
+            "expected_keywords": [
+                "Martini"
+            ],
+            "forbidden_keywords": [
+                "non ho trovato",
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Ricerca parziale con linguaggio naturale"
+        },
+        {
+            "id": "ROOM_01",
+            "category": "ricerca_sala",
+            "query": "Quali opere ci sono nella sala 9?",
+            "expected_keywords": [
+                "sala 9",
+                "Sala 9"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Ricerca opere per sala numerata"
+        },
+        {
+            "id": "ROOM_02",
+            "category": "ricerca_sala",
+            "query": "Cosa posso vedere nella sala 1?",
+            "expected_keywords": [
+                "sala 1",
+                "Sala 1"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Ricerca opere in una sala diversa"
+        },
+        {
+            "id": "MUSEO_01",
+            "category": "info_museo",
+            "query": "Qual è l'indirizzo del museo?",
+            "expected_keywords": [
+                "indirizzo",
+                "via",
+                "Treviso"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Info di contatto del museo"
+        },
+        {
+            "id": "MUSEO_02",
+            "category": "info_museo",
+            "query": "Come si chiama il museo?",
+            "expected_keywords": [
+                "Bailo",
+                "museo"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Nome del museo"
+        },
+        {
+            "id": "TECH_01",
+            "category": "ricerca_tecnica",
+            "query": "Quali opere sono in marmo?",
+            "expected_keywords": [
+                "marmo"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Ricerca per tecnica artistica"
+        },
+        {
+            "id": "TECH_02",
+            "category": "ricerca_tecnica",
+            "query": "Opere in bronzo",
+            "expected_keywords": [
+                "bronzo",
+                "non"
+            ],
+            "forbidden_keywords": [
+                "SQL",
+                "errore tecnico"
+            ],
+            "expect_data": false,
+            "description": "Ricerca per tecnica non presente - deve dire che non ci sono risultati"
+        },
+        {
+            "id": "GREET_01",
+            "category": "saluto",
+            "query": "Ciao!",
+            "expected_keywords": [
+                "ciao",
+                "benvenuto",
+                "benvenuta",
+                "Gyp",
+                "aiutarti",
+                "museo"
+            ],
+            "forbidden_keywords": [
+                "errore",
+                "SQL"
+            ],
+            "expect_data": false,
+            "description": "Saluto semplice - non deve interrogare il DB"
+        },
+        {
+            "id": "GREET_02",
+            "category": "saluto",
+            "query": "Buongiorno, come funziona la guida?",
+            "expected_keywords": [
+                "museo",
+                "aiut",
+                "Gyp",
+                "guid",
+                "oper",
+                "artist"
+            ],
+            "forbidden_keywords": [
+                "errore",
+                "SQL"
+            ],
+            "expect_data": false,
+            "description": "Saluto con domanda generica"
+        },
+        {
+            "id": "JOIN_01",
+            "category": "query_complessa",
+            "query": "Quali sono le opere di Canova?",
+            "expected_keywords": [
+                "Canova"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "JOIN artista -> opere"
+        },
+        {
+            "id": "JOIN_02",
+            "category": "query_complessa",
+            "query": "Opere di Martini in marmo",
+            "expected_keywords": [
+                "Martini",
+                "marmo"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "JOIN triplo: artista + tecnica + opere"
+        },
+        {
+            "id": "ROBUST_01",
+            "category": "robustezza",
+            "query": "Cerca Erler",
+            "expected_keywords": [
+                "Erler"
+            ],
+            "forbidden_keywords": [
+                "errore",
+                "non sono riuscito"
+            ],
+            "expect_data": true,
+            "description": "Query minimale con verbo - solo cognome"
+        },
+        {
+            "id": "ROBUST_02",
+            "category": "robustezza",
+            "query": "canova marmo",
+            "expected_keywords": [
+                "Canova"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Query telegrafica senza verbo"
+        },
+        {
+            "id": "ROBUST_03",
+            "category": "robustezza",
+            "query": "Chi è quell'artista di nome Erler che è nato a Oderzo?",
+            "expected_keywords": [
+                "Erler",
+                "Oderzo"
+            ],
+            "forbidden_keywords": [
+                "non ho trovato"
+            ],
+            "expect_data": true,
+            "description": "Query verbose con dettagli specifici"
+        },
+        {
+            "id": "SANITIZE_01",
+            "category": "sanitizzazione",
+            "query": "Qual è la biografia di Canova?",
+            "expected_keywords": [
+                "Canova"
+            ],
+            "forbidden_keywords": [
+                "SELECT",
+                "FROM",
+                "WHERE",
+                "ILIKE",
+                "siteid",
+                "sql_engine",
+                "tool_name",
+                "tool_args"
+            ],
+            "expect_data": true,
+            "description": "La risposta NON deve contenere SQL o dettagli tecnici"
+        },
+        {
+            "id": "SANITIZE_02",
+            "category": "sanitizzazione",
+            "query": "Raccontami la storia di Arturo Martini",
+            "expected_keywords": [
+                "Martini"
+            ],
+            "forbidden_keywords": [
+                "<p>",
+                "<div>",
+                "<br>",
+                "</p>",
+                "&nbsp;"
+            ],
+            "expect_data": true,
+            "description": "La risposta NON deve contenere tag HTML"
+        },
+        {
+            "id": "NEGAT_01",
+            "category": "negativo",
+            "query": "Chi è Pablo Picasso?",
+            "expected_keywords": [
+                "non",
+                "museo",
+                "database",
+                "archivio"
+            ],
+            "forbidden_keywords": [],
+            "expect_data": false,
+            "description": "Artista non presente nel DB - deve ammettere di non averlo trovato"
+        },
+        {
+            "id": "NEGAT_02",
+            "category": "negativo",
+            "query": "Dove si trova la Gioconda?",
+            "expected_keywords": [
+                "non",
+                "museo"
+            ],
+            "forbidden_keywords": [],
+            "expect_data": false,
+            "description": "Opera non presente nel DB"
+        },
+        {
+            "id": "ILIKE_01",
+            "category": "ilike_parziale",
+            "query": "artisti che contengono 'art' nel nome",
+            "expected_keywords": [
+                "Art"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Ricerca ILIKE parziale - dovrebbe trovare Arturo Martini e altri"
+        },
+        {
+            "id": "SELFCORR_01",
+            "category": "autocorrezione",
+            "query": "Quante opere ha fatto ogni artista?",
+            "expected_keywords": [
+                "art"
+            ],
+            "forbidden_keywords": [
+                "errore tecnico",
+                "SQL",
+                "column"
+            ],
+            "expect_data": true,
+            "description": "JOIN con COUNT - potrebbe richiedere autocorrezione SQL"
+        },
+        {
+            "id": "PATHWAY_01",
+            "category": "percorso",
+            "query": "Quali percorsi sono disponibili?",
+            "expected_keywords": [
+                "percors"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "description": "Lista percorsi"
+        },
+        {
+            "id": "LATENCY_01",
+            "category": "performance",
+            "query": "Chi è Canova?",
+            "expected_keywords": [
+                "Canova"
+            ],
+            "forbidden_keywords": [
+                "errore"
+            ],
+            "expect_data": true,
+            "max_response_time_seconds": 15,
+            "description": "La risposta deve arrivare entro 15 secondi"
+        }
+    ]
+}

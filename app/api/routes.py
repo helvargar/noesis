@@ -3,6 +3,7 @@ API Routes - Complete CRUD for tenants and chat functionality.
 Protected with JWT authentication.
 """
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
+from fastapi.responses import StreamingResponse
 from typing import List, Optional
 import os
 import shutil
@@ -317,6 +318,7 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     site_id: Optional[str] = None
     target: Optional[str] = None
+    stream: bool = False
 
 class ChatResponse(BaseModel):
     answer: str
@@ -417,6 +419,18 @@ async def chat(
         raise HTTPException(status_code=500, detail=f"AI Engine Error: {str(e)}")
 
     try:
+        if request.stream:
+            print(f"[PROCESS] Streaming response for {tenant_id}")
+            return StreamingResponse(
+                pipeline.astream_query(
+                    request.query, 
+                    session_id=request.session_id, 
+                    site_id=request.site_id, 
+                    target=request.target
+                ),
+                media_type="text/plain"
+            )
+
         result = await pipeline.query(request.query, site_id=request.site_id, session_id=request.session_id, target=request.target)
         answer = result["answer"]
         source_type = result["source_type"]

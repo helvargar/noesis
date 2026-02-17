@@ -16,8 +16,9 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     """Run startup tasks."""
-    # Warmup AI pipelines for active tenants to reduce first-query latency
-    # await warmup_pipelines()
+    # Warmup AI pipelines for active tenants to reduce representation latency on first query
+    import asyncio
+    asyncio.create_task(warmup_pipelines())
 
 # Include API routers
 app.include_router(auth_router, prefix="/api/v1")
@@ -41,4 +42,4 @@ def serve_frontend():
     return {"message": "Frontend not found. Access API at /docs"}
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True, reload_dirs=["app"])

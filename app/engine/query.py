@@ -2,7 +2,7 @@ from llama_index.core import VectorStoreIndex, SQLDatabase, Settings, PromptTemp
 from llama_index.core.query_engine import NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine
 from llama_index.core.objects import SQLTableNodeMapping, ObjectIndex, SQLTableSchema
 from llama_index.core.tools import QueryEngineTool, ToolMetadata, FunctionTool
-from llama_index.core.agent import ReActAgent
+from llama_index.core.agent import FunctionAgent, ReActAgent, AgentStream
 from app.core.factory import LLMFactory, EmbedModelFactory
 from app.engine.guardrails import SQLGuardrails
 import os
@@ -13,6 +13,10 @@ from typing import List, Any, Dict
 import time
 import traceback
 import re
+import contextvars
+
+# Global context for multi-site isolation within cached pipelines
+ctx_site_id = contextvars.ContextVar("site_id", default=None)
 
 class TenantQueryPipeline:
     def __init__(
@@ -135,15 +139,20 @@ class TenantQueryPipeline:
                 semantic_guide.append(f"  {concepts} -> tabella '{table}' ({desc})")
 
             context_to_inject = (
-                "Sei Gyp, l'esperto virtuale del Museo Bailo. Parla in modo colto, cordiale e naturale, come se stessi accompagnando un visitatore.\n\n"
+                "Sei la Guida Virtuale ufficiale del Museo Bailo. Sei un assistente multilingue: rispondi sempre nella LINGUA utilizzata dall'utente nell'ultima domanda.\n\n"
                 "CONOSCENZA DEL MUSEO:\n"
                 f"{chr(10).join(semantic_guide)}\n\n"
-                "REGOLA D'ORO (ACCURACY): Per ogni informazione su artisti, opere, sale o collezioni, DEVI usare 'sql_engine'.\n"
-                "1. VERIDICITÀ: Se il database non restituisce nulla per una ricerca specifica (es. un artista non presente), rispondi che non hai informazioni su quel soggetto nel museo.\n"
-                "2. NO ALLUCINAZIONI: MAI inventare attribuzioni o fatti. Non attribuire mai opere esistenti (es. di Martini) a un artista cercato ma non trovato (es. Picasso).\n"
-                "3. SUGGERIMENTI: Solo se l'utente chiede consigli generici (es. 'cosa mi consigli?'), puoi proporre una selezione delle opere che conosci dal database.\n"
-                "4. BYPASS: Per biografie o storie d'opera integrali, includi sempre il token [[DIRECT_DISPLAY]].\n"
-                "5. SEGRETEZZA: Non parlare mai di SQL, database o tool. Parla come un esperto umano.\n"
+                "REGOLE DI COMPORTAMENTO:\n"
+                "1. MULTILINGUA: Rispondi nella lingua dell'utente. Se i dati sono in italiano, traducili tu.\n"
+                "2. NO PREFISSI: Inizia SEMPRE la risposta direttamente. È VIETATO scrivere 'Ecco i dettagli', 'Certamente', 'Bengali:', 'Guida:' o qualsiasi altra etichetta introduttiva.\n"
+                "3. AMBIGUITÀ E DETTAGLIO: Se l'utente chiede di un'opera o artista specifico:\n"
+                "   - DISAMBIGUAZIONE: Se la ricerca DB restituisce più ID DIVERSI, elenca i titoli PULITI (dalla tabella principale) e chiedi quale approfondire. È VIETATO elencare varianti di lingua come opzioni diverse.\n"
+                "   - FILTRO LINGUA: Nelle query SQL su tabelle 'lang' o 'description', aggiungi il filtro sulla lingua dell'utente (es. languageid = 'it').\n"
+                "   - SELEZIONE TARGET: Usa sempre 'audiencetargetid = STD' quando disponibile.\n"
+                "   - COPIA-INCOLLA: Una volta identificata l'opera univoca, fai COPIA-INCOLLA INTEGRALE del testo senza riassumere.\n"
+                "4. PROATTIVITÀ: Usa 'knowledge_archive' immediatamente per ogni domanda su fatti reali.\n"
+                "5. DIVIETO ASSOLUTO TECNICISMI: È vietato menzionare database, SQL, strumenti, errori di query o scusarsi per fallimenti tecnici. Se una query fallisce, riprova silenziosamente.\n"
+                "6. BYPASS: Se ricevi [[DIRECT_DISPLAY]], riporta il testo INTEGRALE senza alcuna modifica o riassunto.\n"
             )
 
             # Construct a rich DDL context dynamically
@@ -160,9 +169,11 @@ class TenantQueryPipeline:
                 "Sei un esperto Senior PostgreSQL per il Museo Bailo. Genera query sintatticamente perfette.\n\n"
                 "REGOLE CRITICHE:\n"
                 "1. NOMI TABELLE: NON usare mai prefissi di schema. Usa nomi semplici (es. 'artistwork', non 'guide.artistwork').\n"
-                "2. Niente chiacchiere: Restituisci esclusivamente il codice SQL iniziando con SELECT. Nessun commento o spiegazione.\n"
-                "3. siteid: Usa sempre 'siteid = 1' per artistwork, artist, site e pathway.\n"
-                "4. PULIZIA: Se i dati nel DB contengono tag HTML (es. <p>, <div>), ignorali e restituisci solo il testo pulito.\n\n"
+                "2. Restituisci esclusivamente SQL (SELECT).\n"
+                "3. siteid: Applica il filtro 'siteid = 1' SOLO alle tabelle che mostrano la colonna 'siteid' nel DDL sottostante.\n"
+                "4. PULIZIA: Se i dati nel DB contengono tag HTML (es. <p>, <div>), ignorali e restituisci solo il testo pulito.\n"
+                "5. RICERCA PARZIALE VS UNIVOCA: Per la DISAMBIGUAZIONE usa 'ILIKE %%term%%'. Una volta che hai identificato l'ID dell'opera (artistworkid), usa SEMPRE 'WHERE artistworkid = X' per recuperare la descrizione, invece di usare di nuovo il titolo. Questo evita di recuperare accidentalmente altre opere con nomi simili.\n"
+                "6. MULTILINGUA: Se l'utente scrive in inglese o spagnolo, cerca prima nelle tabelle di localizzazione (es. 'artistworklang', 'artistdescription') filtrando per 'languageid' (es. 'en', 'es').\n\n"
                 "STRUTTURA REALE (DDL):\n"
                 "{schema_ddl}\n\n"
                 "CAMPIONI DATI (FONDAMENTALI PER I FILTRI):\n"
@@ -170,8 +181,12 @@ class TenantQueryPipeline:
                 "GOLDEN QUERIES (ESEMPI):\n"
                 "Q: opere sala 9 -> SELECT aw.artistworktitle FROM artistwork aw JOIN room r ON aw.roomid = r.roomid WHERE r.roomname ILIKE '%%SALA 9%%' AND aw.siteid = 1;\n"
                 "Q: chi è Martini -> SELECT artistname, artistdescription, biography FROM artist WHERE artistname ILIKE '%%Arturo Martini%%' AND siteid = 1;\n"
-                "Q: opere marmo Canova -> SELECT aw.artistworktitle FROM artistwork aw JOIN artist a ON aw.artistid = a.artistid JOIN technique t ON aw.techniqueid = t.techniqueid WHERE a.artistname ILIKE '%%Antonio Canova%%' AND t.techniquedescription ILIKE '%%MARMO%%';\n"
-                "Q: indirizzo museo -> SELECT address, city FROM site WHERE siteid = 1;\n\n"
+                "Q: che sculture ci sono -> SELECT aw.artistworktitle FROM artistwork aw JOIN artist a ON aw.artistid = a.artistid JOIN artistcategory ac ON a.artistcategoryid = ac.artistcategoryid WHERE (ac.artistcategorydescription ILIKE '%%SCULTORI%%' OR ac.artistcategorydescription ILIKE '%%SCULPTORS%%') AND aw.siteid = 1 AND a.siteid = 1;\n"
+                "Q: mostrami i dipinti -> SELECT aw.artistworktitle FROM artistwork aw JOIN artist a ON aw.artistid = a.artistid JOIN artistcategory ac ON a.artistcategoryid = ac.artistcategoryid WHERE (ac.artistcategorydescription ILIKE '%%PITTORI%%' OR ac.artistcategorydescription ILIKE '%%PAINTERS%%') AND aw.siteid = 1 AND a.siteid = 1;\n"
+                "Q: opere in bronzo -> SELECT aw.artistworktitle FROM artistwork aw JOIN technique t ON aw.techniqueid = t.techniqueid WHERE t.techniquedescription ILIKE '%%BRONZO%%' AND aw.siteid = 1;\n"
+                "Q: indirizzo museo -> SELECT address, city FROM site WHERE siteid = 1;\n"
+                "Q: opere percorso animali -> SELECT aw.artistworktitle FROM artistwork aw JOIN pathwayspot ps ON aw.artistworkid = ps.artistworkid JOIN pathway p ON ps.pathwayid = p.pathwayid WHERE p.pathwayname ILIKE '%%ANIMALI%%' AND aw.siteid = 1 ORDER BY ps.sortingsequence;\n"
+                "Q: info sulla Pisana -> SELECT aw.artistworkid, aw.artistworktitle FROM artistwork aw WHERE aw.artistworktitle ILIKE '%%Pisana%%' AND aw.siteid = 1;\n\n"
                 "Domanda: {query_str}\n"
                 "SQLQuery: "
             ).replace("{schema_ddl}", "\n".join(ddl_blocks)).replace("{samples_hint}", "\n".join(sample_blocks))
@@ -184,15 +199,18 @@ class TenantQueryPipeline:
                     labels = ", ".join(col_info.get("labels", []))
                     sql_context_lines.append(f"  Colonna '{col}': [{labels}]")
             
-            sql_context_lines.append("\nPRESCRIZIONE: Privilegia sempre le colonne '...description' per fornire risposte esaustive.")
+            sql_context_lines.append("\nPRESCRIZIONE QUERY: 1. Per cercare un'opera, inizia sempre con una query su 'artistwork' per vedere se ci sono nomi simili ed evita ambiguità. 2. Per il testo, usa 'artistworkaudiencetargetdesc' con 'audiencetargetid = STD' AND 'languageid = it' (o lingua utente). 3. Se trovi più ID diversi, elenca solo i titoli della tabella 'artistwork'.")
 
-            # Custom response synthesis prompt - forces the LLM to return full text
+            # Custom response synthesis prompt
             RESPONSE_SYNTHESIS_PROMPT_STR = (
-                "Sei Gyp, l'assistente del museo. Basandoti sui risultati SQL, scrivi una risposta ESAUSTIVA.\n"
-                "REGOLA D'ORO: Riporta INTEGRALMENTE tutto il testo descrittivo ottenuto (biografie, storie, descrizioni).\n"
-                "NON RIASSUMERE mai. Se il testo dal database è lungo, riportalo tutto.\n\n"
+    "1. SE TROVI PIÙ RIGHE: \n"
+    "   - Se i titoli delle opere sono diversi (ambiguità sull'oggetto), elenca i titoli e chiedi quale approfondire.\n"
+    "   - Se il titolo è lo stesso o si tratta di LISTE (es. più sale, più opere di un autore, più dettagli), ELENCA semplicemente tutte le informazioni trovate in modo discorsivo o puntato.\n"
+    "2. È VIETATO chiedere 'vuoi sapere quale sala?' se le hai già trovate tutte. Riportale subito.\n"
+    "3. Se hai una descrizione (biografia/opera), riportala integralmente senza tagli.\n"
+    "4. DIVIETO DI SCUSE: È proibito scusarsi per ritardi, errori di sistema o query fallite. Restituisci solo i dati finali.\n"
+    "5. Inizia subito, niente prefissi.\n\n"
                 "Domanda: {query_str}\n"
-                "Query SQL: {sql_query}\n"
                 "Dati dal DB: {context_str}\n"
                 "Risposta: "
             )
@@ -218,7 +236,67 @@ class TenantQueryPipeline:
             import html, re, ast
             def sql_query_tool(query: str) -> str:
                 """Esegue query sul database del museo. Restituisce il testo integrale trovato."""
-                result = _sql_engine.query(query)
+                try:
+                    # 1. ARCHITECTURAL GUARDRAILS
+                    # Ensure the generated SQL is safe and stays within authorized tables
+                    allowed = list(self.db_intel.get("tables", {}).keys())
+                    SQLGuardrails.validate_sql(query, allowed)
+
+                    # Retrieve the site_id for the CURRENT execution context
+                    current_site_id = ctx_site_id.get() or getattr(self, "_last_site_id", None)
+                    if current_site_id:
+                        query_up = query.upper()
+                        from sqlalchemy import inspect
+                        inspector = inspect(self.sql_database.engine)
+                        # Extract all tables mentioned in the query (handles schema.table or just table)
+                        matches = re.findall(r"(?:FROM|JOIN)\s+([a-zA-Z0-9_\.]+)", query_up)
+                        for full_table in matches:
+                            parts = full_table.split(".")
+                            table_name = parts[-1].lower()
+                            schema_name = parts[0].lower() if len(parts) > 1 else "guide"
+                            try:
+                                cols_info = []
+                                try:
+                                    cols_info = inspector.get_columns(table_name, schema=schema_name)
+                                except:
+                                    try:
+                                        cols_info = inspector.get_columns(table_name)
+                                    except:
+                                        pass
+                                
+                                cols = [c['name'].upper() for c in cols_info]
+                                if not cols:
+                                    for sch in inspector.get_schema_names():
+                                        try:
+                                            cols_info = inspector.get_columns(table_name, schema=sch)
+                                            if cols_info: 
+                                                cols = [c['name'].upper() for c in cols_info]
+                                                schema_name = sch
+                                                break
+                                        except: continue
+                                
+                                if "SITEID" in cols and "SITEID" not in query_up:
+                                    return (
+                                        f"ERRORE DI SICUREZZA: La tabella '{table_name}' possiede la colonna 'siteid' ma il filtro manca nella query SQL. "
+                                        f"DEVI aggiungere 'siteid = {current_site_id}' nella clausola WHERE (o nel JOIN)."
+                                    )
+                            except Exception:
+                                pass
+
+                    # 3. EXECUTION
+                    result = _sql_engine.query(query)
+                except Exception as e:
+                    # SELF-CORRECTION LOOP:
+                    # Instead of crashing, return the error to the LLM so it can fix the query
+                    err_msg = str(e)
+                    print(f"[SQL EXEC ERROR] {err_msg}")
+                    return (
+                        f"ERRORE SQL: {err_msg}\n"
+                        "ISTRUZIONE PER L'AGENTE: La tua query SQL ha generato un errore. "
+                        "Analizza l'errore sopra e genera una NUOVA query SQL corretta. "
+                        "NON SCUSARTI, NON MENZIONARE L'ERRORE ALL'UTENTE. "
+                        "Esegui solo la correzione in modo invisibile."
+                    )
                 raw = str(result)
                 
                 # Try to parse the raw string [('text',), ...] to extract pure text
@@ -227,7 +305,7 @@ class TenantQueryPipeline:
                 rows = []
                 try:
                     # Clean up common SQL string artifacts before eval
-                    raw_eval = raw.replace('datetime.date', 'str')
+                    raw_eval = raw.replace('datetime.date', 'str').replace('Decimal', 'float')
                     parsed = ast.literal_eval(raw_eval)
                     if isinstance(parsed, list):
                         for row in parsed:
@@ -237,15 +315,23 @@ class TenantQueryPipeline:
                                     if isinstance(col, str):
                                         max_field_len = max(max_field_len, len(col))
                                 row_str = " - ".join([str(c) for c in row if c is not None and str(c).strip() != ""])
-                                if row_str: rows.append(row_str)
+                                if row_str and row_str not in rows: 
+                                    rows.append(row_str)
                             else:
                                 rows.append(str(row))
                         raw = "\n\n".join(rows)
-                except Exception:
-                    # Fallback: manually strip typical SQL artifacts if eval fails
-                    raw = re.sub(r'[\[\]\(\)]', '', raw)
-                    raw = re.sub(r"None", "", raw)
-                    max_field_len = len(raw)
+                except (ValueError, SyntaxError, Exception) as e:
+                    # FALLBACK: If literal_eval fails, use regex to extract text
+                    print(f"[SQL PARSING WARN] {str(e)} - Falling back to regex.")
+                    # Keep alphanumeric, common punctuation, and spaces
+                    # Remove list/tuple brackets and quotes
+                    cleaned = re.sub(r"[\[\]\(\)\"']", " ", raw)
+                    # Normalize whitespace
+                    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+                    # Remove artifacts like 'datetime.date' or 'Decimal' that might remain
+                    cleaned = re.sub(r"(datetime\.date|Decimal)", "", cleaned)
+                    rows.append(cleaned)
+                    raw = "\n\n".join(rows)
                 
                 # Global HTML/Tag cleaning
                 raw = html.unescape(raw)
@@ -258,17 +344,22 @@ class TenantQueryPipeline:
                 if not raw or raw == "[]":
                     return "Nessun dato trovato nel database."
                 
-                # AUTHORITATIVE BYPASS: Trigger if ANY field is very long (biography/description)
-                if max_field_len > 350:
+                # AUTHORITATIVE BYPASS: Trigger if ANY field is long (biography/description)
+                if max_field_len > 500:
                     self.last_sql_result = raw
-                    return f"Risultato presente nel sistema ([[DIRECT_DISPLAY]])."
+                    # Provide a preview to the agent so it knows what was found
+                    preview = raw[:150] + "..." if len(raw) > 150 else raw
+                    return f"RISULTATO TROVATO (Anteprima: {preview}). Il sistema visualizzerà il testo integrale. [[DIRECT_DISPLAY]]"
                 
                 return f"Risultato:\n{raw}"
             
             sql_tool = FunctionTool.from_defaults(
                 fn=sql_query_tool,
-                name="sql_engine",
-                description=f"Database del museo. Tabelle: {concept_map_desc}. Per testi lunghi restituisce un segnale di bypass."
+                name="knowledge_archive",
+                description=(
+                    f"Archivio certificato del museo. Richiede query SQL PostgreSQL per recuperare dati su: {concept_map_desc}. "
+                    "Includi sempre 'siteid = 1' e usa 'ILIKE' per ricerche parziali."
+                )
             )
             self.query_tools.append(sql_tool)
 
@@ -288,14 +379,14 @@ class TenantQueryPipeline:
                 rag_engine = vector_index.as_query_engine(llm=self.llm, embed_model=self.embed_model)
                 self.query_tools.append(QueryEngineTool.from_defaults(
                     query_engine=rag_engine,
-                    name="document_engine",
-                    description="Usa questo strumento per info estratte da documenti PDF o articoli esterni al database."
+                    name="document_archive",
+                    description="Usa questo strumento per approfondimenti estratti da documenti PDF o articoli bibliografici."
                 ))
             except Exception: pass
 
-        # 6. Create Agent
+        # 6. Create Agent with Function Calling capabilities
         try:
-            self.agent = ReActAgent(
+            self.agent = FunctionAgent(
                 tools=self.query_tools, 
                 llm=self.llm, 
                 system_prompt=context_to_inject,
@@ -323,10 +414,16 @@ class TenantQueryPipeline:
         answer = re.sub(r'\[siteid=\d+\]', '', answer)
         answer = re.sub(r'\(FILTRO OBBLIGATORIO[^)]*\)', '', answer)
         answer = re.sub(r'siteid\s*=\s*\d+', '', answer, flags=re.IGNORECASE)
-        # Hide technical database errors from user
-        if "Error:" in answer or "SQL" in answer or "column" in answer:
-            if "Nessun dato" not in answer:
-                answer = "Mi dispiace, non sono riuscito a trovare le informazioni specifiche nel mio archivio in questo momento. Posso aiutarti con qualcos'altro o vuoi provare a chiedermi di un artista specifico?"
+        # Hide technical database errors and apologies from user
+        technical_terms = ["Error:", "SQL", "column", "query", "tabella", "riprovo", "mi scuso", "errore", "precisare"]
+        if any(term.lower() in answer.lower() for term in technical_terms):
+            if "Nessun dato" not in answer and "Mi dispiace" not in answer:
+                answer = "Mi dispiace, non sono riuscito a trovare le informazioni specifiche nel mio archivio in questo momento. Posso aiutarti con qualcos'altro?"
+        
+        # Aggressive removal of intermediate thoughts if llama-index leaked them
+        answer = re.sub(r'Thought:.*?Action:', '', answer, flags=re.DOTALL)
+        answer = re.sub(r'Observation:.*', '', answer, flags=re.DOTALL)
+        
         # Remove [[DIRECT_DISPLAY]] token if it leaked
         answer = answer.replace('[[DIRECT_DISPLAY]]', '')
         # Remove "Thought:", "Action:", "Observation:" lines (ReAct internals)
@@ -347,6 +444,10 @@ class TenantQueryPipeline:
                 self.session_memory[session_id] = []
             history = self.session_memory[session_id]
             
+            # Set context for tools
+            token = ctx_site_id.set(site_id)
+            self._last_site_id = site_id # Fallback for thread/context loss
+            
             # Clean query
             enriched_query = user_query
             
@@ -361,10 +462,15 @@ class TenantQueryPipeline:
                 )
                 current_context.append(hint)
 
-            # 5. Get Agent Response
+            # 5. Get Agent Response via Native Function Calling
             agent_start = time.time()
-            response = await self.agent.run(user_msg=enriched_query, chat_history=current_context + history)
-            answer = str(response)
+            output = await self.agent.run(user_msg=enriched_query, chat_history=current_context + history)
+            
+            # Extract content from AgentOutput
+            if hasattr(output, "response") and hasattr(output.response, "content"):
+                answer = output.response.content
+            else:
+                answer = str(output)
             print(f"[LATENCY] Agent loop: {time.time() - agent_start:.2f}s")
 
             # --- AUTHORITATIVE BYPASS STRATEGY ---
@@ -384,7 +490,84 @@ class TenantQueryPipeline:
             self.session_memory[session_id] = history[-10:]
 
             print(f"[LATENCY] Total query: {time.time() - start_time:.2f}s")
+            # Always reset context
+            ctx_site_id.reset(token)
             return {"answer": answer, "source_type": "hybrid"}
         except Exception as e:
             traceback.print_exc()
             return {"answer": f"Si è verificato un errore: {str(e)}", "source_type": "error"}
+
+    async def astream_query(self, user_query: str, session_id: str, site_id: str = None, target: str = None):
+        """Asynchronous streaming version of the query method."""
+        if not self.query_tools:
+            yield "Nessuna fonte dati configurata."
+            return
+
+        print(f"[PROCESS] Stream Session: {session_id} | Query: {user_query}")
+        
+        try:
+            if session_id not in self.session_memory:
+                self.session_memory[session_id] = []
+            history = self.session_memory[session_id]
+            
+            # Set context for tools
+            token = ctx_site_id.set(site_id)
+            
+            enriched_query = user_query
+            current_context = []
+            if site_id or target:
+                parts = []
+                if site_id: parts.append(f"siteid={site_id}")
+                if target: parts.append(f"codice_percorso={target}")
+                hint = ChatMessage(
+                    role=MessageRole.SYSTEM, 
+                    content=f"CONTESTO ATTUALE: {', '.join(parts)}. Includi sempre siteid nelle query SQL."
+                )
+                current_context.append(hint)
+
+            # Start the agent workflow run
+            handler = self.agent.run(user_msg=enriched_query, chat_history=current_context + history)
+            
+            full_answer = ""
+            agent_start = time.time()
+            async for event in handler.stream_events():
+                if isinstance(event, AgentStream):
+                    if event.delta:
+                        full_answer += event.delta
+                        # Check if we should immediately stop streaming and bypass
+                        if "[[DIRECT_DISPLAY]]" in full_answer and self.last_sql_result:
+                            # Break streaming loop to trigger bypass below
+                            break
+                        yield event.delta
+            
+            print(f"[LATENCY] Stream Agent loop: {time.time() - agent_start:.2f}s")
+
+            # --- AUTHORITATIVE BYPASS STRATEGY ---
+            if self.last_sql_result:
+                print(f"[BYPASS] Triggering authoritative bypass during stream")
+                # If we were already streaming, we might have sent "Risultato presente..."
+                # We can't "take back" what's already sent, but we can send the rest.
+                # However, for a clean bypass, we usually want to send ONLY the SQL result.
+                # In streaming, we'll just send the last_sql_result as the final chunk if it wasn't already sent.
+                # But to be safe, we'll yield the whole thing if it's a bypass.
+                # Note: The client should handle clearing its buffer if it sees [[DIRECT_DISPLAY]]
+                yield self.last_sql_result
+                full_answer = self.last_sql_result
+            
+            # Reset buffer
+            self.last_sql_result = None
+            
+            # SANITIZE (simplified for stream)
+            full_answer = self._sanitize_response(full_answer)
+            
+            # Update history
+            history.append(ChatMessage(role=MessageRole.USER, content=user_query))
+            history.append(ChatMessage(role=MessageRole.ASSISTANT, content=full_answer))
+            self.session_memory[session_id] = history[-10:]
+            
+            # Reset context
+            ctx_site_id.reset(token)
+
+        except Exception as e:
+            traceback.print_exc()
+            yield f"Errore durante lo streaming: {str(e)}"
