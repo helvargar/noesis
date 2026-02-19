@@ -9,7 +9,7 @@ import os
 import json
 import asyncio
 from llama_index.core.llms import ChatMessage, MessageRole
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
 import time
 import traceback
 import re
@@ -17,6 +17,8 @@ import contextvars
 
 # Global context for multi-site isolation within cached pipelines
 ctx_site_id = contextvars.ContextVar("site_id", default=None)
+ctx_audience_target = contextvars.ContextVar("audience_target", default="STD")
+ctx_language_id = contextvars.ContextVar("language_id", default="it")
 
 class TenantQueryPipeline:
     def __init__(
@@ -58,7 +60,11 @@ class TenantQueryPipeline:
         # 3. Session memory: storing actual ChatMessage objects
         self.session_memory: Dict[str, List[ChatMessage]] = {}
 
-        # 3. Buffer for large SQL results to prevent summarization
+        # Per-session SQL bypass buffer (avoids race conditions between concurrent users)
+        self._sql_bypass: Dict[str, Optional[str]] = {}
+        # Per-session Focus (Last entities viewed)
+        self.session_focus: Dict[str, Dict[str, Any]] = {}
+        # Legacy single-buffer kept for backward compat with streaming path
         self.last_sql_result = None
         self.db_intel = {}
         
@@ -112,6 +118,10 @@ class TenantQueryPipeline:
                 max_string_length=10000
             )
 
+            # --- BROKER INITIALIZATION (Atomic Tools Layer) ---
+            from app.engine.broker import MuseumBroker
+            self.broker = MuseumBroker(self.sql_database.engine, schema=self.schema_name or "guide")
+
             # 1. Table Context for Indexer (Filtered by strictly needed tables)
             from llama_index.core.objects import SQLTableNodeMapping, ObjectIndex, SQLTableSchema
             table_node_mapping = SQLTableNodeMapping(self.sql_database)
@@ -131,103 +141,77 @@ class TenantQueryPipeline:
             )
 
             # 2. Global Agent System Prompt
-            # Format the dictionary into a readable guide for the LLM
-            semantic_guide = ["MAPPATURA CONCETTI -> TABELLE DB:"]
-            for table, info in sem_paradigm.get("tables", {}).items():
-                concepts = ", ".join(info.get("concepts", []))
-                desc = info.get("description", "")
-                semantic_guide.append(f"  {concepts} -> tabella '{table}' ({desc})")
-
-            context_to_inject = (
-                "Sei la Guida Virtuale ufficiale del Museo Bailo. Sei un assistente multilingue: rispondi sempre nella LINGUA utilizzata dall'utente nell'ultima domanda.\n\n"
-                "CONOSCENZA DEL MUSEO:\n"
-                f"{chr(10).join(semantic_guide)}\n\n"
-                "REGOLE DI COMPORTAMENTO:\n"
-                "1. MULTILINGUA: Rispondi nella lingua dell'utente. Se i dati sono in italiano, traducili tu.\n"
-                "2. NO PREFISSI: Inizia SEMPRE la risposta direttamente. È VIETATO scrivere 'Ecco i dettagli', 'Certamente', 'Bengali:', 'Guida:' o qualsiasi altra etichetta introduttiva.\n"
-                "3. AMBIGUITÀ E DETTAGLIO: Se l'utente chiede di un'opera o artista specifico:\n"
-                "   - DISAMBIGUAZIONE: Se la ricerca DB restituisce più ID DIVERSI, elenca i titoli PULITI (dalla tabella principale) e chiedi quale approfondire. È VIETATO elencare varianti di lingua come opzioni diverse.\n"
-                "   - FILTRO LINGUA: Nelle query SQL su tabelle 'lang' o 'description', aggiungi il filtro sulla lingua dell'utente (es. languageid = 'it').\n"
-                "   - SELEZIONE TARGET: Usa sempre 'audiencetargetid = STD' quando disponibile.\n"
-                "   - COPIA-INCOLLA: Una volta identificata l'opera univoca, fai COPIA-INCOLLA INTEGRALE del testo senza riassumere.\n"
-                "4. PROATTIVITÀ: Usa 'knowledge_archive' immediatamente per ogni domanda su fatti reali.\n"
-                "5. DIVIETO ASSOLUTO TECNICISMI: È vietato menzionare database, SQL, strumenti, errori di query o scusarsi per fallimenti tecnici. Se una query fallisce, riprova silenziosamente.\n"
-                "6. BYPASS: Se ricevi [[DIRECT_DISPLAY]], riporta il testo INTEGRALE senza alcuna modifica o riassunto.\n"
-            )
-
-            # Construct a rich DDL context dynamically
+            # 1. CORE ARCHITECTURE: DDL & SCHEMA AWARENESS
+            # We build our knowledge base by extracting DDLs and data samples from the db_intel configuration.
             ddl_blocks = []
             sample_blocks = []
-            schema_prefix = self.db_intel.get("schema", "guide")
             for t_name, t_info in self.db_intel.get("tables", {}).items():
                 ddl_blocks.append(t_info["ddl"])
                 if t_info.get("sample_values"):
                     samples = ", ".join([f"{k}: {v}" for k, v in t_info["sample_values"].items()])
                     sample_blocks.append(f"Table {t_name} samples -> {samples}")
 
+            # Consolidate DDL and samples
+            schema_ddl_str = "\n".join(ddl_blocks)
+            samples_hint_str = "\n".join(sample_blocks)
+            
+            # --- SYSTEM PROMPT ---
+            self.context_to_inject = (
+                "Sei l'Assistente AI Senior del Museo Bailo. Rispondi alle domande degli utenti interrogando il database.\n\n"
+                "### REGOLE DI RISPOSTA:\n"
+                "1. PRIORITÀ TOOL: Usa sempre 'get_artist_info' e 'get_artwork_info' passando il NOME o il TITOLO come stringa.\n"
+                "2. NO ID ALLUCINATI: Non inventare mai ID numerici. Se non conosci l'ID, usa i tool che accettano nomi.\n"
+                "3. RISPOSTA COMPLETA: Quando trovi un artista o un'opera, fornisci subito biografia/descrizione e lista opere/tecnica.\n"
+                "4. TONO: Formale, colto, ma accessibile.\n"
+                "5. LINGUA: Rispondi nella lingua dell'utente.\n\n"
+                "### KNOWLEDGE SOURCE: DATABASE SCHEMA (DDL)\n"
+                f"{schema_ddl_str}\n\n"
+                "### PROTOCOLO TECNICO:\n"
+                "- Se un tool restituisce '[[DIRECT_DISPLAY]]', non cercare di riassumere i dati. Rispondi semplicemente 'Ecco le informazioni su [Nome]:' o simile. Il sistema inserirà automaticamente i dati completi.\n"
+                "- Non menzionare mai SQL, tabelle o ID all'utente.\n"
+            )
+
+            # --- TEXT-TO-SQL PROMPT (The Archive Access) ---
             TEXT_TO_SQL_PROMPT_STR = (
                 "Sei un esperto Senior PostgreSQL per il Museo Bailo. Genera query sintatticamente perfette.\n\n"
                 "REGOLE CRITICHE:\n"
                 "1. NOMI TABELLE: NON usare mai prefissi di schema. Usa nomi semplici (es. 'artistwork', non 'guide.artistwork').\n"
                 "2. Restituisci esclusivamente SQL (SELECT).\n"
                 "3. siteid: Applica il filtro 'siteid = 1' SOLO alle tabelle che mostrano la colonna 'siteid' nel DDL sottostante.\n"
-                "4. PULIZIA: Se i dati nel DB contengono tag HTML (es. <p>, <div>), ignorali e restituisci solo il testo pulito.\n"
-                "5. RICERCA PARZIALE VS UNIVOCA: Per la DISAMBIGUAZIONE usa 'ILIKE %%term%%'. Una volta che hai identificato l'ID dell'opera (artistworkid), usa SEMPRE 'WHERE artistworkid = X' per recuperare la descrizione, invece di usare di nuovo il titolo. Questo evita di recuperare accidentalmente altre opere con nomi simili.\n"
-                "6. MULTILINGUA: Se l'utente scrive in inglese o spagnolo, cerca prima nelle tabelle di localizzazione (es. 'artistworklang', 'artistdescription') filtrando per 'languageid' (es. 'en', 'es').\n\n"
+                "4. TECNICA/MATERIALE: Filtra SEMPRE per tecnica usando un JOIN con la tabella 'technique' su 'techniquedescription'. "
+                "NON cercare mai un materiale o una tecnica in 'artistworkdescription' o 'artistworktitle' — quei campi contengono testo narrativo che può essere fuorviante. "
+                "Esempio CORRETTO: JOIN technique t ON aw.techniqueid = t.techniqueid WHERE t.techniquedescription ILIKE '%%bronzo%%'. "
+                "Esempio SBAGLIATO: WHERE aw.artistworkdescription ILIKE '%%bronzo%%'.\n"
+                "5. RICERCA APERTA (tema, nome, titolo): Usa ILIKE su 'artistworktitle', 'artistworkdescription', 'artistname', 'biography' solo per ricerche per tema o parola chiave generica (NON per filtrare materiali).\n"
                 "STRUTTURA REALE (DDL):\n"
-                "{schema_ddl}\n\n"
-                "CAMPIONI DATI (FONDAMENTALI PER I FILTRI):\n"
-                "{samples_hint}\n\n"
-                "GOLDEN QUERIES (ESEMPI):\n"
-                "Q: opere sala 9 -> SELECT aw.artistworktitle FROM artistwork aw JOIN room r ON aw.roomid = r.roomid WHERE r.roomname ILIKE '%%SALA 9%%' AND aw.siteid = 1;\n"
-                "Q: chi è Martini -> SELECT artistname, artistdescription, biography FROM artist WHERE artistname ILIKE '%%Arturo Martini%%' AND siteid = 1;\n"
-                "Q: che sculture ci sono -> SELECT aw.artistworktitle FROM artistwork aw JOIN artist a ON aw.artistid = a.artistid JOIN artistcategory ac ON a.artistcategoryid = ac.artistcategoryid WHERE (ac.artistcategorydescription ILIKE '%%SCULTORI%%' OR ac.artistcategorydescription ILIKE '%%SCULPTORS%%') AND aw.siteid = 1 AND a.siteid = 1;\n"
-                "Q: mostrami i dipinti -> SELECT aw.artistworktitle FROM artistwork aw JOIN artist a ON aw.artistid = a.artistid JOIN artistcategory ac ON a.artistcategoryid = ac.artistcategoryid WHERE (ac.artistcategorydescription ILIKE '%%PITTORI%%' OR ac.artistcategorydescription ILIKE '%%PAINTERS%%') AND aw.siteid = 1 AND a.siteid = 1;\n"
-                "Q: opere in bronzo -> SELECT aw.artistworktitle FROM artistwork aw JOIN technique t ON aw.techniqueid = t.techniqueid WHERE t.techniquedescription ILIKE '%%BRONZO%%' AND aw.siteid = 1;\n"
-                "Q: indirizzo museo -> SELECT address, city FROM site WHERE siteid = 1;\n"
-                "Q: opere percorso animali -> SELECT aw.artistworktitle FROM artistwork aw JOIN pathwayspot ps ON aw.artistworkid = ps.artistworkid JOIN pathway p ON ps.pathwayid = p.pathwayid WHERE p.pathwayname ILIKE '%%ANIMALI%%' AND aw.siteid = 1 ORDER BY ps.sortingsequence;\n"
-                "Q: info sulla Pisana -> SELECT aw.artistworkid, aw.artistworktitle FROM artistwork aw WHERE aw.artistworktitle ILIKE '%%Pisana%%' AND aw.siteid = 1;\n\n"
+                f"{schema_ddl_str}\n\n"
+                "CAMPIONI DATI:\n"
+                f"{samples_hint_str}\n\n"
                 "Domanda: {query_str}\n"
                 "SQLQuery: "
-            ).replace("{schema_ddl}", "\n".join(ddl_blocks)).replace("{samples_hint}", "\n".join(sample_blocks))
-            
-            # Formattiamo il dizionario per il SQL Engine
-            sql_context_lines = ["DIZIONARIO TABELLE E COLONNE:"]
-            for table, info in sem_paradigm.get("tables", {}).items():
-                sql_context_lines.append(f"Table '{table}': {info.get('description', '')}")
-                for col, col_info in info.get("columns", {}).items():
-                    labels = ", ".join(col_info.get("labels", []))
-                    sql_context_lines.append(f"  Colonna '{col}': [{labels}]")
-            
-            sql_context_lines.append("\nPRESCRIZIONE QUERY: 1. Per cercare un'opera, inizia sempre con una query su 'artistwork' per vedere se ci sono nomi simili ed evita ambiguità. 2. Per il testo, usa 'artistworkaudiencetargetdesc' con 'audiencetargetid = STD' AND 'languageid = it' (o lingua utente). 3. Se trovi più ID diversi, elenca solo i titoli della tabella 'artistwork'.")
+            )
 
-            # Custom response synthesis prompt
+            # Custom response synthesis prompt (for the Query Engine internally)
             RESPONSE_SYNTHESIS_PROMPT_STR = (
-    "1. SE TROVI PIÙ RIGHE: \n"
-    "   - Se i titoli delle opere sono diversi (ambiguità sull'oggetto), elenca i titoli e chiedi quale approfondire.\n"
-    "   - Se il titolo è lo stesso o si tratta di LISTE (es. più sale, più opere di un autore, più dettagli), ELENCA semplicemente tutte le informazioni trovate in modo discorsivo o puntato.\n"
-    "2. È VIETATO chiedere 'vuoi sapere quale sala?' se le hai già trovate tutte. Riportale subito.\n"
-    "3. Se hai una descrizione (biografia/opera), riportala integralmente senza tagli.\n"
-    "4. DIVIETO DI SCUSE: È proibito scusarsi per ritardi, errori di sistema o query fallite. Restituisci solo i dati finali.\n"
-    "5. Inizia subito, niente prefissi.\n\n"
+                "1. SE TROVI PIÙ RIGHE: \n"
+                "   - Se i titoli delle opere sono diversi, elenca i titoli e chiedi quale approfondire.\n"
+                "   - Se il titolo è lo stesso o si tratta di LISTE, ELENCA semplicemente tutte le informazioni trovate in modo discorsivo o puntato.\n"
+                "2. Se hai una descrizione (biografia/opera), riportala integralmente senza tagli.\n"
+                "3. DIVIETO DI SCUSE: Restituisci solo i dati finali.\n\n"
                 "Domanda: {query_str}\n"
                 "Dati dal DB: {context_str}\n"
                 "Risposta: "
             )
 
-            # Build tool description dynamically
-            concept_map_desc = ". ".join([
-                f"'{t}' per {', '.join(i.get('concepts', [])[:2])}"
-                for t, i in sem_paradigm.get("tables", {}).items()
-            ])
-
+            self.sem_paradigm = sem_paradigm
+            
             self.sql_engine = NLSQLTableQueryEngine(
                 self.sql_database,
                 tables=tables_to_reflect,
                 llm=self.llm,
                 sql_limit=500,
                 synthesize_response=False,
-                context_str="\n".join(sql_context_lines),
+                context_str="\n".join([f"Info on tables: {schema_ddl_str}", f"Info on samples: {samples_hint_str}"]),
                 text_to_sql_prompt=PromptTemplate(TEXT_TO_SQL_PROMPT_STR)
             )
             
@@ -353,22 +337,261 @@ class TenantQueryPipeline:
                 
                 return f"Risultato:\n{raw}"
             
+            # --- ATOMIC TOOLS (Based on MuseumBroker) ---
+            def search_artworks_tool(title: Optional[str] = None, artist: Optional[str] = None, 
+                                     category: Optional[str] = None, room: Optional[str] = None,
+                                     technique: Optional[str] = None, general_query: Optional[str] = None) -> str:
+                """Trova opere nel catalogo (tabella 'artistwork'). 
+                Parametri facoltativi: title, artist, category, room, technique. 
+                Usa questo SOLO per trovare l'ID dell'opera o per elenchi. 
+                Se l'utente vuole INFO su un'opera specifica, devi chiamare ANCHE 'get_artwork_details'."""
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1))
+                results = self.broker.list_opere(site_id, title, artist, category, room, technique, general_query)
+                if not results: return "Nessuna opera trovata."
+                return json.dumps(results, indent=2)
+
+            def get_artwork_details_tool(artwork_id: int) -> str:
+                """Recupera l'intera riga dei dati tecnici e la descrizione (campo 'artistworktargetdescription') di un'opera dal suo artistworkid."""
+                lang = ctx_language_id.get() or "it"
+                target = ctx_audience_target.get() or "STD"
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
+                result = self.broker.get_opera_details(site_id, artwork_id, lang, target)
+                if not result: 
+                    return "Dettagli non disponibili per questa opera."
+                
+                # Add a marker to help the agent focus
+                result["_INTERNAL_NOTICE_"] = f"Stai visualizzando i dettagli dell'OPERA '{result.get('artistworktitle')}'. Non parlare dell'artista se non richiesto."
+                # If description is very long, we can still use the bypass strategy
+                if len(result.get("description", "")) > 500:
+                    self.last_sql_result = result["description"]
+                    
+                    # Update focus
+                    session_id = getattr(self, "_current_session_id", "default")
+                    focus = self.session_focus.get(session_id, {})
+                    focus.update({"artwork_id": artwork_id, "artwork_title": result.get("artistworktitle")})
+                    self.session_focus[session_id] = focus
+                    
+                    return f"Descrizione trovata per {result.get('artistworktitle')}. [[DIRECT_DISPLAY]]"
+                
+                # Update focus for standard results too
+                session_id = getattr(self, "_current_session_id", "default")
+                focus = self.session_focus.get(session_id, {})
+                focus.update({"artwork_id": artwork_id, "artwork_title": result.get("artistworktitle")})
+                self.session_focus[session_id] = focus
+                
+                return json.dumps(result, indent=2)
+
+            def search_artists_tool(name: Optional[str] = None, category: Optional[str] = None) -> str:
+                """Trova artisti (tabella 'artist'). Filtri: name, category.
+                ATTENZIONE: questo tool restituisce solo l'ID e il nome. 
+                Per rispondere all'utente su un artista specifico, devi chiamare ANCHE 'get_artist_details' con l'artistid ottenuto.
+                Non rispondere all'utente senza aver prima chiamato get_artist_details."""
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
+                lang = ctx_language_id.get() or "it"
+                results = self.broker.list_artisti(site_id, name, category, lang)
+                if not results: return "Nessun artista trovato."
+                return json.dumps(results, indent=2)
+
+            def get_artist_details_tool(artist_id: int) -> str:
+                """Recupera biografia COMPLETA e dettagli tramite artistid.
+                OBBLIGATORIO: chiamalo SEMPRE dopo search_artists se l'utente chiede info su un artista.
+                Non fermarti a search_artists: senza get_artist_details la risposta è parziale e sbagliata."""
+                lang = ctx_language_id.get()
+                result = self.broker.get_artista_details(artist_id, lang)
+                if not result:
+                    return "Artista non trovato nel database."
+                # Enrich with artworks list (exclude Sensoriale)
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
+                artworks = self.broker.list_opere(site_id, artist_name=result.get("artistname"))
+                if artworks:
+                    result["opere"] = [
+                        {"titolo": a.get("artistworktitle"), "tecnica": a.get("techniquedescription"), "sala": a.get("roomname")}
+                        for a in artworks
+                    ]
+                bio = result.get("description") or result.get("biography") or ""
+                if len(bio) > 300:
+                    bypass_parts = [bio]
+                    if result.get("opere"):
+                        bypass_parts.append("\n\nOpere nel museo:")
+                        bypass_parts.extend([f"- {o['titolo']} ({o.get('tecnica','N/A')})" for o in result["opere"]])
+                    
+                    # Store in session-specific bypass
+                    session_id = getattr(self, "_current_session_id", "default")
+                    self._sql_bypass[session_id] = "\n".join(bypass_parts)
+                    
+                    # Update focus
+                    focus = self.session_focus.get(session_id, {})
+                    focus.update({"artist_id": artist_id, "artist_name": result.get("artistname")})
+                    self.session_focus[session_id] = focus
+                    
+                    return f"DETTAGLI CARICATI: La biografia e le opere di {result.get('artistname')} sono pronte per la visualizzazione diretta. Rispondi all'utente confermando il ritrovamento. [[DIRECT_DISPLAY]]"
+                return json.dumps(result, ensure_ascii=False, indent=2)
+
+            def get_artist_info_tool(name: str) -> str:
+                """Recupera biografia e opere di un artista cercandolo per NOME.
+                Usa questo tool se conosci il nome dell'artista (es. 'Cacciapuoti' o 'Guido Cacciapuoti')."""
+                try:
+                    # Robust fallback for site_id logic
+                    raw_id = ctx_site_id.get() or getattr(self, "_last_site_id", 1)
+                    site_id = int(raw_id) if raw_id is not None else 1
+                    lang = ctx_language_id.get() or "it"
+                    
+                    matches = self.broker.list_artisti(site_id, name=name, language_id=lang)
+                    if not matches: return f"Nessun artista trovato con il nome '{name}'."
+                    
+                    if len(matches) > 1 and name.lower() not in [m["artistname"].lower() for m in matches]:
+                        return "Ho trovato più artisti con nomi simili: " + ", ".join([m["artistname"] for m in matches])
+                    
+                    return get_artist_details_tool(matches[0]["artistid"])
+                except Exception as te:
+                    print(f"[ERROR] get_artist_info: {te}")
+                    return "Si è verificato un errore nel recupero delle informazioni."
+
+            def get_artwork_info_tool(title: str) -> str:
+                """Recupera i dettagli tecnici e la descrizione di un'opera cercandola per TITOLO.
+                Usa questo tool se conosci il titolo dell'opera (es. 'Gallo e gallina')."""
+                try:
+                    site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
+                    # 1. Search for IDs
+                    matches = self.broker.list_opere(site_id, title=title)
+                    if not matches: return f"Nessun'opera trovata con il titolo '{title}'."
+                    
+                    if len(matches) > 3:
+                         return "Ho trovato molte opere con titoli simili. Potresti essere più specifico? Ecco alcune: " + ", ".join([m["artistworktitle"] for m in matches[:5]])
+                    
+                    # Take the best match
+                    artwork_id = matches[0]["artistworkid"]
+                    return get_artwork_details_tool(artwork_id)
+                except Exception as te:
+                    print(f"[ERROR] get_artwork_info: {te}")
+                    return "Si è verificato un errore nel recupero delle informazioni sull'opera."
+
+            def list_locations_tool() -> str:
+                """Elenca tutte le sale ed edifici del museo dove sono presenti opere."""
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
+                results = self.broker.list_locations(site_id)
+                if not results: return "Nessuna sala trovata."
+                return json.dumps(results, indent=2)
+
+            def get_location_details_tool(location_id: int) -> str:
+                """Recupera la descrizione e i dati di una sala (tabella 'room' / 'location') tramite locationid."""
+                lang = ctx_language_id.get()
+                result = self.broker.get_location_details(location_id, lang)
+                if not result: return "Dettagli non disponibili per questa sala."
+                return json.dumps(result, indent=2)
+
+            def get_pathway_info_tool(pathway_name: Optional[str] = None, pathway_id: Optional[int] = None) -> str:
+                """Recupera la descrizione e la lista delle opere di un percorso tematico.
+                - pathway_name: il nome del percorso (es. 'MODA', 'ANIMALI')
+                - pathway_id: l'ID numerico del percorso (se noto)
+                """
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1))
+                lang = ctx_language_id.get()
+                
+                pid = pathway_id
+                if not pid and pathway_name:
+                    # Cerca l'ID dal nome
+                    pathways = self.broker.list_pathways(site_id)
+                    for p in pathways:
+                        if pathway_name.upper() in p["pathwayname"].upper():
+                            pid = p["pathwayid"]
+                            break
+                
+                if not pid:
+                    return f"Non ho trovato il percorso '{pathway_name or pathway_id}'."
+                
+                # Prendi dettagli
+                details = self.broker.get_pathway_details(pid, lang)
+                # Prendi opere
+                artworks = self.broker.get_percorso_opere(site_id, details.get("pathwayname", pathway_name))
+                
+                result = {
+                    "pathway_name": details.get("pathwayname"),
+                    "description": details.get("description"),
+                    "artworks": artworks
+                }
+                
+                if len(result["description"] or "") > 500:
+                    self.last_sql_result = result["description"] + "\n\nOpere nel percorso:\n" + "\n".join([f"- {a['artistworktitle']}" for a in artworks])
+                    return f"Informazioni trovate per il percorso {result['pathway_name']}. [[DIRECT_DISPLAY]]"
+                
+                return json.dumps(result, indent=2)
+
+            def list_pathways_tool() -> str:
+                """Elenca tutti i percorsi tematici disponibili nel museo."""
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
+                results = self.broker.list_pathways(site_id)
+                if not results: return "Nessun percorso trovato."
+                return json.dumps(results, indent=2)
+
+            def list_categories_tool() -> str:
+                """Elenca le categorie disponibili (es. Pittura, Scultura). 
+                ATTENZIONE: Se l'utente chiede una LISTA di opere ('mostrami i dipinti'), NON usare questo strumento, usa search_artworks(category='PITTORI'). 
+                Usa questo solo se l'utente chiede esplicitamente 'Quali categorie ci sono?'."""
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
+                results = self.broker.list_categories(site_id)
+                if not results: return "Nessuna categoria trovata."
+                return ", ".join(results)
+
+            def list_techniques_tool() -> str:
+                """Elenca le tecniche e i materiali delle opere presenti (es. Olio su tela, Marmo)."""
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
+                results = self.broker.list_techniques(site_id)
+                if not results: return "Nessuna tecnica trovata."
+                return ", ".join(results)
+
+            def get_museum_info_tool() -> str:
+                """Recupera la storia, l'architettura e i contatti generali del museo."""
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
+                result = self.broker.get_museum_info(site_id) or {}
+                # Force fallback if fields are empty, None or missing
+                if not result.get("history") or len(str(result.get("history"))) < 10:
+                    result["history"] = "Il Museo Luigi Bailo è la sede storica della galleria d'arte moderna di Treviso. Fondato nel 1879 dall'Abate Luigi Bailo, è stato riaperto nel 2015 con un restyling che fonde il chiostro antico con una galleria moderna in vetro e cemento."
+                if not result.get("architecture"):
+                    result["architecture"] = "L'architettura attuale è un dialogo tra l'ex convento rinascimentale e la nuova facciata minimalista, che funge da 'lanterna' urbana."
+                return json.dumps(result, indent=2)
+
+            def list_related_artworks_tool(room_id: int) -> str:
+                """Elenca altre opere presenti nella stessa sala (cross-selling/approfondimento)."""
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1))
+                results = self.broker.list_artworks_in_room(site_id, room_id)
+                if not results: return "Nessuna opera correlata trovata."
+                return json.dumps(results, indent=2)
+
+            def search_by_inventory_tool(inventory_number: str) -> str:
+                """Trova un'opera specifica partendo dal suo numero di inventario (es. MCA 123)."""
+                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1))
+                results = self.broker.search_by_inventory(site_id, inventory_number)
+                if not results: return f"Nessun'opera trovata con inventario {inventory_number}."
+                return json.dumps(results, indent=2)
+
+            self.query_tools.extend([
+                FunctionTool.from_defaults(fn=get_artist_info_tool, name="get_artist_info"),
+                FunctionTool.from_defaults(fn=get_artwork_info_tool, name="get_artwork_info"),
+                FunctionTool.from_defaults(fn=search_artworks_tool, name="search_artworks"),
+                FunctionTool.from_defaults(fn=get_artwork_details_tool, name="get_artwork_details"),
+                FunctionTool.from_defaults(fn=search_artists_tool, name="search_artists"),
+                FunctionTool.from_defaults(fn=get_artist_details_tool, name="get_artist_details"),
+                FunctionTool.from_defaults(fn=list_locations_tool, name="list_locations"),
+                FunctionTool.from_defaults(fn=get_location_details_tool, name="get_location_details"),
+                FunctionTool.from_defaults(fn=get_pathway_info_tool, name="get_pathway_info"),
+                FunctionTool.from_defaults(fn=list_pathways_tool, name="list_pathways"),
+                FunctionTool.from_defaults(fn=list_categories_tool, name="list_categories"),
+                FunctionTool.from_defaults(fn=list_techniques_tool, name="list_techniques"),
+                FunctionTool.from_defaults(fn=get_museum_info_tool, name="get_museum_info"),
+                FunctionTool.from_defaults(fn=list_related_artworks_tool, name="list_related_artworks"),
+                FunctionTool.from_defaults(fn=search_by_inventory_tool, name="search_by_inventory")
+            ])
+
             sql_tool = FunctionTool.from_defaults(
                 fn=sql_query_tool,
                 name="knowledge_archive",
                 description=(
-                    f"Archivio certificato del museo. Richiede query SQL PostgreSQL per recuperare dati su: {concept_map_desc}. "
-                    "Includi sempre 'siteid = 1' e usa 'ILIKE' per ricerche parziali."
+                    "MOTORE SQL POSTGRESQL. Utilizza questo per aggregazioni (COUNT, SUM), query multi-tabella complesse "
+                    "o quando i parametri dei tool atomici non sono sufficienti per coprire il DDL fornito."
                 )
             )
             self.query_tools.append(sql_tool)
-
-            # 4. General Chat Tool
-            def general_chat(query: str) -> str:
-                """Utile per saluti o chiacchiere che non richiedono dati."""
-                return f"Ciao! Sono Gyp. Come posso aiutarti oggi?"
-            
-            self.query_tools.append(FunctionTool.from_defaults(fn=general_chat, name="greeting_tool"))
 
         # 5. RAG Engine
         if doc_store_path and os.path.exists(doc_store_path):
@@ -384,25 +607,30 @@ class TenantQueryPipeline:
                 ))
             except Exception: pass
 
-        # 6. Create Agent with Function Calling capabilities
+        # 6. Create Agent (Workflow-based in LlamaIndex v0.12+)
         try:
-            self.agent = FunctionAgent(
+            print(f"--- Creating Agent (Tools count: {len(self.query_tools)}) ---")
+            
+            # Direct constructor for Workflow-based agents
+            self.agent = ReActAgent(
                 tools=self.query_tools, 
                 llm=self.llm, 
-                system_prompt=context_to_inject,
-                verbose=False
+                system_prompt=self.context_to_inject,
+                verbose=True
             )
+            print("--- Agent Created successfully ---")
+            
+            # 7. Initialize session-specific SQL bypass and state
+            self._sql_bypass: Dict[str, Optional[str]] = {}
+            self._last_site_id: int = 1
             
         except Exception as e:
-            print(f"[ERROR] Pipeline init failed: {e}")
+            print(f"[ERROR] Agent Creation failed: {e}")
+            import traceback
             traceback.print_exc()
+            raise e
 
-        except Exception as e:
-            traceback.print_exc()
-            return {"answer": f"Si è verificato un errore: {str(e)}", "source_type": "error"}
-
-    @staticmethod
-    def _sanitize_response(answer: str) -> str:
+    def _sanitize_response(self, answer: str, technical_only: bool = False) -> str:
         """Remove any leaked technical details from the agent's response."""
         import re
         # Remove tool call blocks (```tool_name ... ``` and ```tool_args ... ```)
@@ -414,20 +642,29 @@ class TenantQueryPipeline:
         answer = re.sub(r'\[siteid=\d+\]', '', answer)
         answer = re.sub(r'\(FILTRO OBBLIGATORIO[^)]*\)', '', answer)
         answer = re.sub(r'siteid\s*=\s*\d+', '', answer, flags=re.IGNORECASE)
-        # Hide technical database errors and apologies from user
-        technical_terms = ["Error:", "SQL", "column", "query", "tabella", "riprovo", "mi scuso", "errore", "precisare"]
-        if any(term.lower() in answer.lower() for term in technical_terms):
-            if "Nessun dato" not in answer and "Mi dispiace" not in answer:
-                answer = "Mi dispiace, non sono riuscito a trovare le informazioni specifiche nel mio archivio in questo momento. Posso aiutarti con qualcos'altro?"
+        
+        if technical_only:
+            return answer.strip()
+
+        # Hide only raw internal errors, but allow natural language including words like 'errore'
+        if "sqlalchemy.exc" in answer or "psycopg2" in answer:
+            answer = "Mi dispiace, ho riscontrato un problema tecnico nell'accesso ai dati. Posso provare a cercare in un altro modo?"
+        
+        # Remove internal IDs and technical keys (e.g., ID: 6, artist_id=12)
+        answer = re.sub(r'\b(ID|id|artistid|artistworkid|siteid|roomid)[:\s=]+\d+\b', '', answer, flags=re.IGNORECASE)
+        # Remove image URLs or paths if leaked in raw text
+        answer = re.sub(r'https?://\S+\.(jpg|png|jpeg|gif)', '', answer, flags=re.IGNORECASE)
+        # Remove metadata field names
+        answer = re.sub(r'\b(inventorynumber|imageref|artist_alias)[:\s=]+', '', answer, flags=re.IGNORECASE)
         
         # Aggressive removal of intermediate thoughts if llama-index leaked them
         answer = re.sub(r'Thought:.*?Action:', '', answer, flags=re.DOTALL)
         answer = re.sub(r'Observation:.*', '', answer, flags=re.DOTALL)
         
-        # Remove [[DIRECT_DISPLAY]] token if it leaked
+        # Remove [[DIRECT_DISPLAY]] token and ReAct internal tags
         answer = answer.replace('[[DIRECT_DISPLAY]]', '')
-        # Remove "Thought:", "Action:", "Observation:" lines (ReAct internals)
         answer = re.sub(r'^(Thought|Action|Observation|Action Input):.*$', '', answer, flags=re.MULTILINE)
+        
         # Clean up excessive whitespace
         answer = re.sub(r'\n{3,}', '\n\n', answer)
         return answer.strip()
@@ -438,15 +675,31 @@ class TenantQueryPipeline:
             return {"answer": "Nessuna fonte dati configurata.", "source_type": "none"}
             
         print(f"[PROCESS] Session: {session_id} | Query: {user_query}")
+        self._current_session_id = session_id
         
         try:
             if session_id not in self.session_memory:
                 self.session_memory[session_id] = []
             history = self.session_memory[session_id]
             
+            # Simple language detection
+            detected_lang = "it"
+            q_low = user_query.lower()
+            if any(w in q_low for w in ["english", "what is", "tell me", "where is", "who was", "describe", "show me"]): detected_lang = "en"
+            elif any(w in q_low for w in ["français", "qu'est-ce", "raconte-moi", "où est", "décris"]): detected_lang = "fr"
+            elif any(w in q_low for w in ["español", "qué es", "cuéntame", "donde está", "describe"]): detected_lang = "es"
+
             # Set context for tools
-            token = ctx_site_id.set(site_id)
-            self._last_site_id = site_id # Fallback for thread/context loss
+            token_site = ctx_site_id.set(site_id)
+            token_target = ctx_audience_target.set(target or "STD")
+            token_lang = ctx_language_id.set(detected_lang) 
+            
+            # Ensure site_id is an integer for the fallback
+            try:
+                self._last_site_id = int(site_id) if site_id is not None else 1
+            except:
+                self._last_site_id = 1
+            self._last_target = target
             
             # Clean query
             enriched_query = user_query
@@ -455,47 +708,76 @@ class TenantQueryPipeline:
             if site_id or target:
                 parts = []
                 if site_id: parts.append(f"siteid={site_id}")
-                if target: parts.append(f"codice_percorso={target}")
+                if target: parts.append(f"target_pubblico={target}")
                 hint = ChatMessage(
                     role=MessageRole.SYSTEM, 
-                    content=f"CONTESTO ATTUALE: {', '.join(parts)}. Includi sempre siteid nelle query SQL per artistwork/pathway. Nota: la tabella 'room' non ha siteid, usala solo in JOIN con artistwork."
+                    content=f"CONTESTO ESECUTIVO: {', '.join(parts)}. Usa gli strumenti atomici (search_artworks, get_artwork_details, etc.) per rispondere. Gli strumenti filtrano automaticamente per siteid e target di pubblico."
                 )
                 current_context.append(hint)
 
-            # 5. Get Agent Response via Native Function Calling
-            agent_start = time.time()
-            output = await self.agent.run(user_msg=enriched_query, chat_history=current_context + history)
+            # 4. Initialize local memory for this session
+            from llama_index.core.memory import ChatMemoryBuffer
+            memory = ChatMemoryBuffer.from_defaults(chat_history=history, token_limit=4000)
             
-            # Extract content from AgentOutput
-            if hasattr(output, "response") and hasattr(output.response, "content"):
-                answer = output.response.content
-            else:
-                answer = str(output)
-            print(f"[LATENCY] Agent loop: {time.time() - agent_start:.2f}s")
+            # 4b. Inject Session Focus into temporary context
+            focus = self.session_focus.get(session_id, {})
+            focus_str = ""
+            if focus.get("artist_name"): focus_str += f"- Artist Focus: {focus['artist_name']} (ID: {focus['artist_id']})\n"
+            if focus.get("artwork_title"): focus_str += f"- Artwork Focus: {focus['artwork_title']} (ID: {focus['artwork_id']})\n"
+            
+            if focus_str:
+                current_context.append(ChatMessage(
+                    role=MessageRole.SYSTEM,
+                    content=f"FOCUS CORRENTE DELLA CONVERSAZIONE:\n{focus_str}\nUsa queste informazioni se l'utente fa domande di follow-up (es. 'dove è nato?', 'mostrami le sue opere')."
+                ))
 
-            # --- AUTHORITATIVE BYPASS STRATEGY ---
-            if self.last_sql_result:
-                print(f"[BYPASS] Triggering authoritative bypass")
-                answer = self.last_sql_result
+            # 5. Get Agent Response
+            agent_start = time.time()
+            full_chat_history = history + current_context
+            # Combine history and current executive context
+            response = await self.agent.run(user_msg=user_query, chat_history=full_chat_history)
+            answer = str(response)
             
-            # Reset buffer
-            self.last_sql_result = None
-            
+            # Update memory
+            memory.put(ChatMessage(role=MessageRole.USER, content=user_query))
+            memory.put(ChatMessage(role=MessageRole.ASSISTANT, content=answer))
+
             # SANITIZE: Remove any leaked technical details
             answer = self._sanitize_response(answer)
-            
-            # Save original query (not enriched) in history
-            history.append(ChatMessage(role=MessageRole.USER, content=user_query))
-            history.append(ChatMessage(role=MessageRole.ASSISTANT, content=answer))
-            self.session_memory[session_id] = history[-10:]
 
+            # --- AUTHORITATIVE BYPASS STRATEGY ---
+            bypass_content = self._sql_bypass.get(session_id)
+            if bypass_content:
+                print(f"[BYPASS] Triggering authoritative bypass for session {session_id}")
+                answer = self._sanitize_response(bypass_content, technical_only=True)
+            
+            # Save the full updated history (including tool calls/results) from the memory buffer
+            # Optimized: Keep only last 10 messages to stay within TPM limits
+            self.session_memory[session_id] = memory.get_all()[-10:] 
+            
+            # Reset session bypass
+            self._sql_bypass[session_id] = None
+
+            print(f"[LATENCY] Agent loop: {time.time() - agent_start:.2f}s")
             print(f"[LATENCY] Total query: {time.time() - start_time:.2f}s")
             # Always reset context
-            ctx_site_id.reset(token)
+            self._current_session_id = None
+            # Always reset context
+            ctx_site_id.reset(token_site)
+            ctx_audience_target.reset(token_target)
+            ctx_language_id.reset(token_lang)
             return {"answer": answer, "source_type": "hybrid"}
         except Exception as e:
+            err_msg = str(e)
+            print(f"[CRITICAL ERROR] {err_msg}")
             traceback.print_exc()
-            return {"answer": f"Si è verificato un errore: {str(e)}", "source_type": "error"}
+            
+            if "429" in err_msg or "Resource exhausted" in err_msg or "quota" in err_msg.lower():
+                 friendly_answer = "Siamo spiacenti, il sistema è temporaneamente sovraccarico. Per favore, attendi qualche secondo e riprova la tua domanda."
+            else:
+                 friendly_answer = "Mi scuso, ho riscontrato un problema imprevisto nel generare la risposta. Puoi provare a riformulare leggermente la domanda?"
+            
+            return {"answer": friendly_answer, "source_type": "error"}
 
     async def astream_query(self, user_query: str, session_id: str, site_id: str = None, target: str = None):
         """Asynchronous streaming version of the query method."""
@@ -510,64 +792,88 @@ class TenantQueryPipeline:
                 self.session_memory[session_id] = []
             history = self.session_memory[session_id]
             
-            # Set context for tools
-            token = ctx_site_id.set(site_id)
+            # Simple language detection
+            detected_lang = "it"
+            q_low = user_query.lower()
+            if any(w in q_low for w in ["english", "what is", "tell me", "where is", "who was", "describe", "show me"]): detected_lang = "en"
+            elif any(w in q_low for w in ["français", "qu'est-ce", "raconte-moi", "où est", "décris"]): detected_lang = "fr"
+            elif any(w in q_low for w in ["español", "qué es", "cuéntame", "donde está", "describe"]): detected_lang = "es"
+
+            # Set context
+            token_site = ctx_site_id.set(site_id)
+            token_target = ctx_audience_target.set(target or "STD")
+            token_lang = ctx_language_id.set(detected_lang)
             
-            enriched_query = user_query
+            self._last_site_id = site_id
+            self._last_target = target
+            
             current_context = []
             if site_id or target:
                 parts = []
                 if site_id: parts.append(f"siteid={site_id}")
-                if target: parts.append(f"codice_percorso={target}")
+                if target: parts.append(f"target_pubblico={target}")
                 hint = ChatMessage(
                     role=MessageRole.SYSTEM, 
-                    content=f"CONTESTO ATTUALE: {', '.join(parts)}. Includi sempre siteid nelle query SQL."
+                    content=f"CONTESTO ESECUTIVO: {', '.join(parts)}. Usa gli strumenti atomici filtra automaticamente per siteid e target."
                 )
                 current_context.append(hint)
 
-            # Start the agent workflow run
-            handler = self.agent.run(user_msg=enriched_query, chat_history=current_context + history)
+            # 4. Initialize local memory
+            from llama_index.core.memory import ChatMemoryBuffer
+            memory = ChatMemoryBuffer.from_defaults(chat_history=history, token_limit=4000)
             
-            full_answer = ""
+            # 5. Get Stream Response via Workflow events
             agent_start = time.time()
+            full_chat_history = history + current_context
+            
+            # Start the run
+            handler = self.agent.run(user_msg=user_query, chat_history=full_chat_history)
+            
+            full_response = ""
             async for event in handler.stream_events():
-                if isinstance(event, AgentStream):
-                    if event.delta:
-                        full_answer += event.delta
-                        # Check if we should immediately stop streaming and bypass
-                        if "[[DIRECT_DISPLAY]]" in full_answer and self.last_sql_result:
-                            # Break streaming loop to trigger bypass below
-                            break
-                        yield event.delta
+                # Use getattr to be safe across different versions of AgentStream/Event
+                delta = getattr(event, "delta", None)
+                if delta:
+                    full_response += delta
+                    # Handle bypass detection during stream
+                    if "[[DIRECT_DISPLAY]]" in full_response and self.last_sql_result:
+                        break
+                    yield delta
             
-            print(f"[LATENCY] Stream Agent loop: {time.time() - agent_start:.2f}s")
+            # Ensure the workflow actually finished and get final output
+            output = await handler 
+            
+            # FALLBACK: If nothing was streamed (full_response is empty), 
+            # try to get the content from the final output
+            if not full_response:
+                if hasattr(output, "response") and hasattr(output.response, "content"):
+                    full_response = output.response.content
+                elif hasattr(output, "content"):
+                    full_response = output.content
+                else:
+                    full_response = str(output)
+                
+                # Sanitize and yield the final answer if we haven't sent anything
+                full_response = self._sanitize_response(full_response)
+                yield full_response
 
-            # --- AUTHORITATIVE BYPASS STRATEGY ---
-            if self.last_sql_result:
-                print(f"[BYPASS] Triggering authoritative bypass during stream")
-                # If we were already streaming, we might have sent "Risultato presente..."
-                # We can't "take back" what's already sent, but we can send the rest.
-                # However, for a clean bypass, we usually want to send ONLY the SQL result.
-                # In streaming, we'll just send the last_sql_result as the final chunk if it wasn't already sent.
-                # But to be safe, we'll yield the whole thing if it's a bypass.
-                # Note: The client should handle clearing its buffer if it sees [[DIRECT_DISPLAY]]
-                yield self.last_sql_result
-                full_answer = self.last_sql_result
-            
-            # Reset buffer
+            # Update memory for stream - Optimized history size
+            memory.put(ChatMessage(role=MessageRole.USER, content=user_query))
+            memory.put(ChatMessage(role=MessageRole.ASSISTANT, content=full_response))
+            self.session_memory[session_id] = memory.get_all()[-10:]
+
+            # Final cleanup
             self.last_sql_result = None
-            
-            # SANITIZE (simplified for stream)
-            full_answer = self._sanitize_response(full_answer)
-            
-            # Update history
-            history.append(ChatMessage(role=MessageRole.USER, content=user_query))
-            history.append(ChatMessage(role=MessageRole.ASSISTANT, content=full_answer))
-            self.session_memory[session_id] = history[-10:]
-            
-            # Reset context
-            ctx_site_id.reset(token)
+            ctx_site_id.reset(token_site)
+            ctx_audience_target.reset(token_target)
+            ctx_language_id.reset(token_lang)
 
         except Exception as e:
+            err_msg = str(e)
+            print(f"[STREAM ERROR] {err_msg}")
             traceback.print_exc()
-            yield f"Errore durante lo streaming: {str(e)}"
+            
+            if "429" in err_msg or "Resource exhausted" in err_msg:
+                yield "Siamo spiacenti, il sistema è temporaneamente sovraccarico. Per favore, attendi qualche secondo e riprova."
+            else:
+                yield "Mi scuso, si è verificato un problema nel caricamento della risposta. Per favore, riprova tra un istante."
