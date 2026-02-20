@@ -2,7 +2,7 @@ from llama_index.core import VectorStoreIndex, SQLDatabase, Settings, PromptTemp
 from llama_index.core.query_engine import NLSQLTableQueryEngine, SQLTableRetrieverQueryEngine
 from llama_index.core.objects import SQLTableNodeMapping, ObjectIndex, SQLTableSchema
 from llama_index.core.tools import QueryEngineTool, ToolMetadata, FunctionTool
-from llama_index.core.agent import FunctionAgent, ReActAgent, AgentStream
+from llama_index.core.agent import FunctionAgent, AgentStream
 from app.core.factory import LLMFactory, EmbedModelFactory
 from app.engine.guardrails import SQLGuardrails
 import os
@@ -158,6 +158,9 @@ class TenantQueryPipeline:
             # --- SYSTEM PROMPT ---
             self.context_to_inject = (
                 "Sei l'Assistente AI Senior del Museo Bailo. Rispondi alle domande degli utenti interrogando il database.\n\n"
+                "### SALUTI E CONVERSAZIONE:\n"
+                "Se l'utente invia un saluto, un ringraziamento o una frase conversazionale generica, "
+                "rispondi direttamente con cortesia senza chiamare alcun tool.\n\n"
                 "### REGOLE DI RISPOSTA:\n"
                 "1. PRIORITÀ TOOL: Usa sempre 'get_artist_info' e 'get_artwork_info' passando il NOME o il TITOLO come stringa.\n"
                 "2. NO ID ALLUCINATI: Non inventare mai ID numerici. Se non conosci l'ID, usa i tool che accettano nomi.\n"
@@ -167,8 +170,8 @@ class TenantQueryPipeline:
                 "### KNOWLEDGE SOURCE: DATABASE SCHEMA (DDL)\n"
                 f"{schema_ddl_str}\n\n"
                 "### PROTOCOLO TECNICO:\n"
-                "- Se un tool restituisce '[[DIRECT_DISPLAY]]', non cercare di riassumere i dati. Rispondi semplicemente 'Ecco le informazioni su [Nome]:' o simile. Il sistema inserirà automaticamente i dati completi.\n"
-                "- Non menzionare mai SQL, tabelle o ID all'utente.\n"
+                "- Quando un tool restituisce testi lunghi (biografie, descrizioni di opere), riportali INTEGRALMENTE senza tagli o riassunti.\n"
+                "- Non menzionare mai SQL, tabelle, ID o dettagli tecnici interni all'utente.\n"
             )
 
             # --- TEXT-TO-SQL PROMPT (The Archive Access) ---
@@ -328,13 +331,6 @@ class TenantQueryPipeline:
                 if not raw or raw == "[]":
                     return "Nessun dato trovato nel database."
                 
-                # AUTHORITATIVE BYPASS: Trigger if ANY field is long (biography/description)
-                if max_field_len > 500:
-                    self.last_sql_result = raw
-                    # Provide a preview to the agent so it knows what was found
-                    preview = raw[:150] + "..." if len(raw) > 150 else raw
-                    return f"RISULTATO TROVATO (Anteprima: {preview}). Il sistema visualizzerà il testo integrale. [[DIRECT_DISPLAY]]"
-                
                 return f"Risultato:\n{raw}"
             
             # --- ATOMIC TOOLS (Based on MuseumBroker) ---
@@ -352,34 +348,30 @@ class TenantQueryPipeline:
 
             def get_artwork_details_tool(artwork_id: int) -> str:
                 """Recupera l'intera riga dei dati tecnici e la descrizione (campo 'artistworktargetdescription') di un'opera dal suo artistworkid."""
-                lang = ctx_language_id.get() or "it"
-                target = ctx_audience_target.get() or "STD"
-                site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
-                result = self.broker.get_opera_details(site_id, artwork_id, lang, target)
-                if not result: 
-                    return "Dettagli non disponibili per questa opera."
-                
-                # Add a marker to help the agent focus
-                result["_INTERNAL_NOTICE_"] = f"Stai visualizzando i dettagli dell'OPERA '{result.get('artistworktitle')}'. Non parlare dell'artista se non richiesto."
-                # If description is very long, we can still use the bypass strategy
-                if len(result.get("description", "")) > 500:
-                    self.last_sql_result = result["description"]
+                try:
+                    lang = ctx_language_id.get() or "it"
+                    target = ctx_audience_target.get() or "STD"
+                    raw_site = ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1
+                    current_site_id = int(raw_site)
                     
-                    # Update focus
+                    result = self.broker.get_opera_details(current_site_id, artwork_id, lang, target)
+                    if not result: 
+                        return "Dettagli non disponibili per questa opera."
+                    
+                    # Remove internal fields before returning to agent
+                    result.pop("_INTERNAL_NOTICE_", None)
+                    
+                    # Update session focus
                     session_id = getattr(self, "_current_session_id", "default")
                     focus = self.session_focus.get(session_id, {})
                     focus.update({"artwork_id": artwork_id, "artwork_title": result.get("artistworktitle")})
                     self.session_focus[session_id] = focus
                     
-                    return f"Descrizione trovata per {result.get('artistworktitle')}. [[DIRECT_DISPLAY]]"
-                
-                # Update focus for standard results too
-                session_id = getattr(self, "_current_session_id", "default")
-                focus = self.session_focus.get(session_id, {})
-                focus.update({"artwork_id": artwork_id, "artwork_title": result.get("artistworktitle")})
-                self.session_focus[session_id] = focus
-                
-                return json.dumps(result, indent=2)
+                    return json.dumps(result, ensure_ascii=False, indent=2)
+                except Exception as e:
+                    import traceback
+                    traceback.print_exc()
+                    return f"Errore nel recupero dettagli opera: {e}"
 
             def search_artists_tool(name: Optional[str] = None, category: Optional[str] = None) -> str:
                 """Trova artisti (tabella 'artist'). Filtri: name, category.
@@ -400,7 +392,7 @@ class TenantQueryPipeline:
                 result = self.broker.get_artista_details(artist_id, lang)
                 if not result:
                     return "Artista non trovato nel database."
-                # Enrich with artworks list (exclude Sensoriale)
+                # Enrich with artworks list
                 site_id = int(ctx_site_id.get() or getattr(self, "_last_site_id", 1) or 1)
                 artworks = self.broker.list_opere(site_id, artist_name=result.get("artistname"))
                 if artworks:
@@ -408,23 +400,13 @@ class TenantQueryPipeline:
                         {"titolo": a.get("artistworktitle"), "tecnica": a.get("techniquedescription"), "sala": a.get("roomname")}
                         for a in artworks
                     ]
-                bio = result.get("description") or result.get("biography") or ""
-                if len(bio) > 300:
-                    bypass_parts = [bio]
-                    if result.get("opere"):
-                        bypass_parts.append("\n\nOpere nel museo:")
-                        bypass_parts.extend([f"- {o['titolo']} ({o.get('tecnica','N/A')})" for o in result["opere"]])
-                    
-                    # Store in session-specific bypass
-                    session_id = getattr(self, "_current_session_id", "default")
-                    self._sql_bypass[session_id] = "\n".join(bypass_parts)
-                    
-                    # Update focus
-                    focus = self.session_focus.get(session_id, {})
-                    focus.update({"artist_id": artist_id, "artist_name": result.get("artistname")})
-                    self.session_focus[session_id] = focus
-                    
-                    return f"DETTAGLI CARICATI: La biografia e le opere di {result.get('artistname')} sono pronte per la visualizzazione diretta. Rispondi all'utente confermando il ritrovamento. [[DIRECT_DISPLAY]]"
+                
+                # Update session focus
+                session_id = getattr(self, "_current_session_id", "default")
+                focus = self.session_focus.get(session_id, {})
+                focus.update({"artist_id": artist_id, "artist_name": result.get("artistname")})
+                self.session_focus[session_id] = focus
+                
                 return json.dumps(result, ensure_ascii=False, indent=2)
 
             def get_artist_info_tool(name: str) -> str:
@@ -511,11 +493,7 @@ class TenantQueryPipeline:
                     "artworks": artworks
                 }
                 
-                if len(result["description"] or "") > 500:
-                    self.last_sql_result = result["description"] + "\n\nOpere nel percorso:\n" + "\n".join([f"- {a['artistworktitle']}" for a in artworks])
-                    return f"Informazioni trovate per il percorso {result['pathway_name']}. [[DIRECT_DISPLAY]]"
-                
-                return json.dumps(result, indent=2)
+                return json.dumps(result, ensure_ascii=False, indent=2)
 
             def list_pathways_tool() -> str:
                 """Elenca tutti i percorsi tematici disponibili nel museo."""
@@ -607,12 +585,11 @@ class TenantQueryPipeline:
                 ))
             except Exception: pass
 
-        # 6. Create Agent (Workflow-based in LlamaIndex v0.12+)
+        # 6. Create Agent (FunctionAgent uses native function calling — no ReAct text traces)
         try:
             print(f"--- Creating Agent (Tools count: {len(self.query_tools)}) ---")
             
-            # Direct constructor for Workflow-based agents
-            self.agent = ReActAgent(
+            self.agent = FunctionAgent(
                 tools=self.query_tools, 
                 llm=self.llm, 
                 system_prompt=self.context_to_inject,
@@ -631,39 +608,33 @@ class TenantQueryPipeline:
             raise e
 
     def _sanitize_response(self, answer: str, technical_only: bool = False) -> str:
-        """Remove any leaked technical details from the agent's response."""
-        import re
-        # Remove tool call blocks (```tool_name ... ``` and ```tool_args ... ```)
-        answer = re.sub(r'```tool_name\s*.*?```', '', answer, flags=re.DOTALL)
-        answer = re.sub(r'```tool_args\s*.*?```', '', answer, flags=re.DOTALL)
-        # Remove any remaining code fences with SQL
-        answer = re.sub(r'```sql\s*.*?```', '', answer, flags=re.DOTALL)
-        # Remove siteid references
+        """Remove leaked technical artifacts from the response.
+        
+        With FunctionAgent, tool calls are structured objects — the response text
+        is already the user-facing answer. This method only needs to clean up
+        data-level leaks (siteid, SQL errors, internal IDs) not agent-level ones.
+        """
+        # Remove internal tokens
+        answer = answer.replace('[[DIRECT_DISPLAY]]', '')
+        
+        # Remove siteid references that tools might have leaked into their output
         answer = re.sub(r'\[siteid=\d+\]', '', answer)
         answer = re.sub(r'\(FILTRO OBBLIGATORIO[^)]*\)', '', answer)
-        answer = re.sub(r'siteid\s*=\s*\d+', '', answer, flags=re.IGNORECASE)
+        answer = re.sub(r'\bsiteid\s*=\s*\d+', '', answer, flags=re.IGNORECASE)
+        
+        # Remove code fences with SQL (from tool error messages fed back to agent)
+        answer = re.sub(r'```sql\s*.*?```', '', answer, flags=re.DOTALL)
         
         if technical_only:
             return answer.strip()
 
-        # Hide only raw internal errors, but allow natural language including words like 'errore'
+        # Replace raw DB exceptions with a user-friendly message
         if "sqlalchemy.exc" in answer or "psycopg2" in answer:
-            answer = "Mi dispiace, ho riscontrato un problema tecnico nell'accesso ai dati. Posso provare a cercare in un altro modo?"
+            return "Mi dispiace, ho riscontrato un problema tecnico nell'accesso ai dati. Posso provare a cercare in un altro modo?"
         
-        # Remove internal IDs and technical keys (e.g., ID: 6, artist_id=12)
-        answer = re.sub(r'\b(ID|id|artistid|artistworkid|siteid|roomid)[:\s=]+\d+\b', '', answer, flags=re.IGNORECASE)
-        # Remove image URLs or paths if leaked in raw text
-        answer = re.sub(r'https?://\S+\.(jpg|png|jpeg|gif)', '', answer, flags=re.IGNORECASE)
-        # Remove metadata field names
+        # Remove internal IDs and technical field names
+        answer = re.sub(r'\b(artistid|artistworkid|siteid|roomid|locationid)[:\s=]+\d+\b', '', answer, flags=re.IGNORECASE)
         answer = re.sub(r'\b(inventorynumber|imageref|artist_alias)[:\s=]+', '', answer, flags=re.IGNORECASE)
-        
-        # Aggressive removal of intermediate thoughts if llama-index leaked them
-        answer = re.sub(r'Thought:.*?Action:', '', answer, flags=re.DOTALL)
-        answer = re.sub(r'Observation:.*', '', answer, flags=re.DOTALL)
-        
-        # Remove [[DIRECT_DISPLAY]] token and ReAct internal tags
-        answer = answer.replace('[[DIRECT_DISPLAY]]', '')
-        answer = re.sub(r'^(Thought|Action|Observation|Action Input):.*$', '', answer, flags=re.MULTILINE)
         
         # Clean up excessive whitespace
         answer = re.sub(r'\n{3,}', '\n\n', answer)
@@ -734,29 +705,27 @@ class TenantQueryPipeline:
             # 5. Get Agent Response
             agent_start = time.time()
             full_chat_history = history + current_context
-            # Combine history and current executive context
-            response = await self.agent.run(user_msg=user_query, chat_history=full_chat_history)
-            answer = str(response)
+            handler = self.agent.run(user_msg=user_query, chat_history=full_chat_history)
+            agent_output = await handler
+            
+            # Extract the clean user-facing text from AgentOutput
+            # FunctionAgent returns structured output — response.content is the final text
+            answer = ""
+            if hasattr(agent_output, 'response'):
+                answer = agent_output.response.content or ""
+            if not answer:
+                answer = str(agent_output)
             
             # Update memory
             memory.put(ChatMessage(role=MessageRole.USER, content=user_query))
             memory.put(ChatMessage(role=MessageRole.ASSISTANT, content=answer))
 
-            # SANITIZE: Remove any leaked technical details
+            # Clean up any data-level leaks (siteid, SQL errors, internal IDs)
             answer = self._sanitize_response(answer)
 
-            # --- AUTHORITATIVE BYPASS STRATEGY ---
-            bypass_content = self._sql_bypass.get(session_id)
-            if bypass_content:
-                print(f"[BYPASS] Triggering authoritative bypass for session {session_id}")
-                answer = self._sanitize_response(bypass_content, technical_only=True)
-            
             # Save the full updated history (including tool calls/results) from the memory buffer
             # Optimized: Keep only last 10 messages to stay within TPM limits
-            self.session_memory[session_id] = memory.get_all()[-10:] 
-            
-            # Reset session bypass
-            self._sql_bypass[session_id] = None
+            self.session_memory[session_id] = memory.get_all()[-10:]
 
             print(f"[LATENCY] Agent loop: {time.time() - agent_start:.2f}s")
             print(f"[LATENCY] Total query: {time.time() - start_time:.2f}s")
@@ -831,13 +800,9 @@ class TenantQueryPipeline:
             
             full_response = ""
             async for event in handler.stream_events():
-                # Use getattr to be safe across different versions of AgentStream/Event
                 delta = getattr(event, "delta", None)
                 if delta:
                     full_response += delta
-                    # Handle bypass detection during stream
-                    if "[[DIRECT_DISPLAY]]" in full_response and self.last_sql_result:
-                        break
                     yield delta
             
             # Ensure the workflow actually finished and get final output
@@ -853,17 +818,13 @@ class TenantQueryPipeline:
                 else:
                     full_response = str(output)
                 
-                # Sanitize and yield the final answer if we haven't sent anything
                 full_response = self._sanitize_response(full_response)
                 yield full_response
 
-            # Update memory for stream - Optimized history size
+            # Update memory for stream
             memory.put(ChatMessage(role=MessageRole.USER, content=user_query))
             memory.put(ChatMessage(role=MessageRole.ASSISTANT, content=full_response))
             self.session_memory[session_id] = memory.get_all()[-10:]
-
-            # Final cleanup
-            self.last_sql_result = None
             ctx_site_id.reset(token_site)
             ctx_audience_target.reset(token_target)
             ctx_language_id.reset(token_lang)
